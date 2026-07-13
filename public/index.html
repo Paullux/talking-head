@@ -92,9 +92,10 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x15171c);
 const camera = new THREE.PerspectiveCamera(28, innerWidth/innerHeight, 0.01, 100);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x333340, 1.1));
-const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(-1,1.4,2); scene.add(key);
-const fill = new THREE.DirectionalLight(0xbbd0ff, 0.6); fill.position.set(1.5,0.3,1.2); scene.add(fill);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x4b4652, 1.35));
+const key = new THREE.DirectionalLight(0xffffff, 1.95); key.position.set(-1,1.4,2); scene.add(key);
+const fill = new THREE.DirectionalLight(0xf0e6dc, 1.35); fill.position.set(2.6,0.9,2.4); scene.add(fill);
+const faceFill = new THREE.DirectionalLight(0xffffff, 0.55); faceFill.position.set(0,0.4,2.8); scene.add(faceFill);
 
 function resize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
 addEventListener('resize', resize); resize();
