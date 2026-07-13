@@ -1,4 +1,6 @@
-# Avatar vocal incarné (web)
+# Talking Head — avatar vocal incarné (web)
+
+![Real-time 3D Avatar with Lip Sync](docs/banner.png)
 
 Assistante 3D qui **parle** : micro → LLM (API externe) → voix (Piper) → visèmes (Rhubarb) → lip-sync temps réel dans le navigateur (three.js).
 
@@ -56,3 +58,6 @@ blender --background ../antifa_bust_rigged_weight2_fixed.blend \
 - STT = **Web Speech API** (navigateur, gratuit) — Chrome/Edge le supportent bien en `fr-FR`.
 - TTS = **Piper** voix `fr_FR-siwis-medium` (changeable dans le Dockerfile / `PIPER_VOICE`).
 - Idle (clignements, sourcils) piloté en JS côté front via les morphs `blink`/`browUp`.
+
+## Licence
+[MIT](LICENSE) © 2026 Paul Woisard
