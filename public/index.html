@@ -18,6 +18,12 @@
          padding:8px 16px;border-radius:10px;background:rgba(8,10,14,.62);
          text-shadow:0 1px 3px #000;opacity:0;transition:opacity .25s}
   #reply.on{opacity:1}
+  #prefs{position:fixed;top:44px;right:14px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-size:13px}
+  #prefs label{display:flex;gap:6px;align-items:center;background:rgba(8,10,14,.6);padding:6px 10px;border-radius:8px;cursor:pointer}
+  #prefs button{background:#3a2140;color:#f3d0ff;border:0;padding:6px 10px;border-radius:8px;font-size:12px;cursor:pointer}
+  #rgpd{position:fixed;left:0;right:0;bottom:0;display:none;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;
+        padding:12px 18px;background:rgba(8,10,14,.94);border-top:1px solid #333;font-size:13px;z-index:5}
+  #rgpd b{color:#9cf} #rgpd button{background:#e11d48;color:#fff;border:0;padding:8px 16px;border-radius:8px;cursor:pointer}
   #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,12,16,.55);backdrop-filter:blur(2px)}
   #start{font-size:18px;padding:16px 30px;border-radius:12px}
   #start:disabled{opacity:.5;cursor:default}
@@ -31,6 +37,14 @@
 <div id="ui">
   <button id="mic">🎤 Parler</button>
   <button id="play" style="background:#334">▶ Démo « Hello World »</button>
+</div>
+<div id="prefs">
+  <label><input type="checkbox" id="saveChk"> Enregistrer ce que l'on dit</label>
+  <button id="clearBtn">🗑 Effacer l'historique</button>
+</div>
+<div id="rgpd">
+  <span>🔒 Nora mémorise la conversation <b>uniquement dans votre navigateur</b> (localStorage), et seulement si vous cochez « Enregistrer ». Vos messages sont envoyés au modèle (Mistral) et à ce serveur pour générer la voix, mais <b>ne sont pas stockés côté serveur</b>.</span>
+  <button id="rgpdOk">J'ai compris</button>
 </div>
 <div id="startOverlay"><button id="start" disabled>chargement…</button></div>
 
@@ -171,6 +185,24 @@ document.getElementById('start').onclick = async ()=>{
   catch(err){ set('accueil indisponible ('+err.message+') — clique 🎤'); }
 };
 
+// ---- conversation history + RGPD (all client-side, localStorage) ----
+const HKEY='nora_history', SKEY='nora_save', RKEY='nora_rgpd';
+let history = [];
+try { history = JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch(e){}
+let saveOn = localStorage.getItem(SKEY) === '1';   // privacy by default: off
+const saveChk = document.getElementById('saveChk');
+saveChk.checked = saveOn;
+saveChk.onchange = ()=>{ saveOn = saveChk.checked; localStorage.setItem(SKEY, saveOn?'1':'0'); if(saveOn) persist(); };
+function persist(){ if(saveOn) localStorage.setItem(HKEY, JSON.stringify(history.slice(-40))); }
+document.getElementById('clearBtn').onclick = ()=>{
+  history = []; localStorage.removeItem(HKEY); set('historique effacé');
+};
+// RGPD banner (once)
+if(localStorage.getItem(RKEY) !== '1') document.getElementById('rgpd').style.display = 'flex';
+document.getElementById('rgpdOk').onclick = ()=>{
+  localStorage.setItem(RKEY,'1'); document.getElementById('rgpd').style.display='none';
+};
+
 // ---- voice conversation : mic (STT) -> /api/chat -> speak ----
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const micBtn = document.getElementById('mic');
@@ -182,9 +214,12 @@ else {
     const text = ev.results[0][0].transcript;
     set('« '+text+' »');
     try{
-      const r = await fetch('/api/chat', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
+      const r = await fetch('/api/chat', {method:'POST', headers:{'content-type':'application/json'},
+        body:JSON.stringify({text, history: history.slice(-8)})});
       const data = await r.json();
       if(data.error){ set('erreur: '+data.error); return; }
+      history.push({role:'user', content:text}, {role:'assistant', content:data.reply});
+      persist();
       speak('data:'+data.mime+';base64,'+data.audio, data.cues, data.reply);
     }catch(e){ set('erreur réseau: '+e.message); }
   };
