@@ -129,7 +129,12 @@ function speak(audioSrc, newCues, text){
   if(audio){ audio.pause(); }
   audio = new Audio(audioSrc);
   audio.onended = ()=>{ playing=false; set('à toi 🎤'); setTimeout(()=>replyEl.classList.remove('on'), 1400); };
-  audio.oncanplay = ()=>{ audio.play(); playing=true; set('elle parle…'); };
+  audio.oncanplay = ()=>{
+    audio.play().then(()=>{
+      playing=true;
+      set('elle parle…');
+    }).catch(err=>set('audio bloqué: '+err.message));
+  };
 }
 
 // ---- idle (blink + occasional brow) ----
@@ -225,11 +230,15 @@ else {
     set('« '+text+' »');
     try{
       set('Nora réfléchit…');
-      const data = await postJson('/api/chat', {text, history: history.slice(-8)});
-      history.push({role:'user', content:text}, {role:'assistant', content:data.reply});
+      const llm = await postJson('/api/chat-text', {text, history: history.slice(-8)});
+      replyEl.textContent = llm.reply;
+      replyEl.classList.add('on');
+      history.push({role:'user', content:text}, {role:'assistant', content:llm.reply});
       persist();
+      set('Nora prépare sa voix…');
+      const voice = await postJson('/api/say', {text: llm.reply});
       set('voix prête…');
-      speak('data:'+data.mime+';base64,'+data.audio, data.cues, data.reply);
+      speak('data:'+voice.mime+';base64,'+voice.audio, voice.cues, llm.reply);
     }catch(e){ set('erreur réseau: '+e.message); }
   };
   rec.onerror = (e)=> set('micro: '+e.error);

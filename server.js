@@ -21,6 +21,7 @@ const {
   PIPER_BIN = "piper",
   PIPER_VOICE = "/opt/voices/fr_FR-siwis-medium.onnx",
   RHUBARB_BIN = "rhubarb",
+  RHUBARB_RECOGNIZER = "phonetic",
   FFMPEG_BIN = "ffmpeg",
   LLM_API_BASE = "https://api.mistral.ai/v1",
   LLM_API_KEY = "",
@@ -68,25 +69,33 @@ function spawnWithInput(file, args, input, { timeoutMs = 30000 } = {}) {
 async function say(text, id = shortId()) {
   const dir = await mkdtemp(join(tmpdir(), "say-"));
   const t0 = Date.now();
+  const timings = {};
   try {
     const raw = join(dir, "raw.wav");
     const wav16 = join(dir, "v16.wav");
     // Piper: text on stdin -> wav
     logStep(id, "tts:piper:start", `chars=${text.length}`);
     await spawnWithInput(PIPER_BIN, ["--model", PIPER_VOICE, "--output_file", raw], text);
-    logStep(id, "tts:piper:ok", `ms=${Date.now() - t0}`);
+    timings.piperMs = Date.now() - t0;
+    logStep(id, "tts:piper:ok", `ms=${timings.piperMs}`);
     // normalise for Rhubarb (mono 16k PCM)
+    const ffmpegT0 = Date.now();
     logStep(id, "tts:ffmpeg:start");
     await execFileP(FFMPEG_BIN, ["-y", "-i", raw, "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav16]);
-    logStep(id, "tts:ffmpeg:ok", `ms=${Date.now() - t0}`);
+    timings.ffmpegMs = Date.now() - ffmpegT0;
+    logStep(id, "tts:ffmpeg:ok", `ms=${timings.ffmpegMs}`);
     // visemes
-    logStep(id, "lipsync:rhubarb:start");
+    const rhubarbT0 = Date.now();
+    logStep(id, "lipsync:rhubarb:start", `recognizer=${RHUBARB_RECOGNIZER}`);
     const { stdout } = await execFileP(RHUBARB_BIN,
-      ["-f", "json", "--extendedShapes", "GHX", wav16], { maxBuffer: 16 * 1024 * 1024 });
+      ["-f", "json", "--recognizer", RHUBARB_RECOGNIZER, "--extendedShapes", "GHX", wav16],
+      { maxBuffer: 16 * 1024 * 1024 });
+    timings.rhubarbMs = Date.now() - rhubarbT0;
     const cues = JSON.parse(stdout).mouthCues;
     const audio = await readFile(raw);
-    logStep(id, "say:ok", `ms=${Date.now() - t0} cues=${cues.length} audio=${audio.length}`);
-    return { audio: audio.toString("base64"), mime: "audio/wav", cues };
+    timings.totalMs = Date.now() - t0;
+    logStep(id, "say:ok", `ms=${timings.totalMs} cues=${cues.length} audio=${audio.length}`);
+    return { audio: audio.toString("base64"), mime: "audio/wav", cues, timings };
   } finally {
     rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -119,11 +128,17 @@ async function chat(userText, history = [], id = shortId()) {
 // ---- server -------------------------------------------------------------
 const app = express();
 app.use(express.json({ limit: "1mb" }));
+app.use((req, res, next) => {
+  if (req.path === "/" || req.path.endsWith(".html")) {
+    res.setHeader("Cache-Control", "no-store");
+  }
+  next();
+});
 app.use(express.static(join(__dirname, "public")));
 
 app.get("/api/health", (_req, res) => res.json({
   ok: true,
-  version: "diag-2026-07-13",
+  version: "diag-tts-timing-2026-07-13",
   llm: {
     configured: Boolean(LLM_API_KEY.trim()),
     apiBase: LLM_API_BASE,
@@ -134,7 +149,7 @@ app.get("/api/health", (_req, res) => res.json({
 
 app.get("/api/version", (_req, res) => res.json({
   ok: true,
-  version: "diag-2026-07-13",
+  version: "diag-tts-timing-2026-07-13",
   endpoints: {
     health: "GET /api/health",
     chatText: "POST /api/chat-text",

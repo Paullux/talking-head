@@ -157,9 +157,11 @@ $('run').onclick = async () => {
     const audioUrl = `data:${say.data.mime};base64,${say.data.audio}`;
     $('audio').src = audioUrl;
     $('ttsInfo').textContent = `${say.data.mime}, base64 ${say.data.audio.length} caractères`;
+    $('ttsRaw').textContent = pretty({ timings: say.data.timings || null });
   } else {
     $('audio').removeAttribute('src');
     $('ttsInfo').textContent = say.data.error || 'Audio absent';
+    $('ttsRaw').textContent = pretty(say);
   }
 
   const cues = say.data.cues || [];

@@ -15,10 +15,10 @@ RUN wget -qO /tmp/piper.tgz "$PIPER_URL" \
 ENV LD_LIBRARY_PATH=/opt/piper
 
 RUN mkdir -p /opt/voices \
-    && wget -qO /opt/voices/fr_FR-siwis-medium.onnx \
-       "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx?download=true" \
-    && wget -qO /opt/voices/fr_FR-siwis-medium.onnx.json \
-       "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json?download=true"
+    && wget -qO /opt/voices/fr_FR-siwis-low.onnx \
+       "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/low/fr_FR-siwis-low.onnx?download=true" \
+    && wget -qO /opt/voices/fr_FR-siwis-low.onnx.json \
+       "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/low/fr_FR-siwis-low.onnx.json?download=true"
 
 # ---- Rhubarb (visemes) --------------------------------------------------
 ARG RHUBARB_URL=https://github.com/DanielSWolf/rhubarb-lip-sync/releases/download/v1.13.0/Rhubarb-Lip-Sync-1.13.0-Linux.zip
@@ -37,8 +37,9 @@ COPY public ./public
 
 ENV PORT=3000 \
     PIPER_BIN=/opt/piper/piper \
-    PIPER_VOICE=/opt/voices/fr_FR-siwis-medium.onnx \
+    PIPER_VOICE=/opt/voices/fr_FR-siwis-low.onnx \
     RHUBARB_BIN=/opt/rhubarb/rhubarb \
+    RHUBARB_RECOGNIZER=phonetic \
     FFMPEG_BIN=ffmpeg
 EXPOSE 3000
 CMD ["node", "server.js"]
