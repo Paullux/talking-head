@@ -10,6 +10,9 @@
   #ui{position:fixed;left:16px;bottom:16px;display:flex;gap:10px;align-items:center}
   button{background:#e11d48;color:#fff;border:0;padding:10px 18px;border-radius:8px;font-size:15px;cursor:pointer}
   #status{position:fixed;left:16px;top:12px;font-size:13px;opacity:.7}
+  #heard{position:fixed;left:16px;top:36px;max-width:min(520px,78vw);font-size:15px;line-height:1.35;color:#fff;
+         padding:7px 10px;border-radius:8px;background:rgba(8,10,14,.5);opacity:0;transition:opacity .2s}
+  #heard.on{opacity:1}
   #name{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:26px;font-weight:700;letter-spacing:.06em;
         background:linear-gradient(90deg,#7cc4ff,#b18cff);-webkit-background-clip:text;background-clip:text;color:transparent;
         text-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none}
@@ -33,6 +36,7 @@
 <canvas id="c"></canvas>
 <div id="name">Nora</div>
 <div id="status">chargement…</div>
+<div id="heard"></div>
 <div id="reply"></div>
 <div id="ui">
   <button id="mic">🎤 Parler</button>
@@ -60,8 +64,13 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const statusEl = document.getElementById('status');
+const heardEl = document.getElementById('heard');
 const replyEl = document.getElementById('reply');
 const set = t => statusEl.textContent = t;
+function showHeard(text){
+  heardEl.textContent = text ? 'Vous : ' + text : '';
+  heardEl.classList.toggle('on', Boolean(text));
+}
 async function postJson(url, payload){
   console.time(url);
   const r = await fetch(url, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(payload)});
@@ -91,9 +100,11 @@ function resize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjection
 addEventListener('resize', resize); resize();
 
 // ---- load avatar ----
-let face = null, dict = null, infl = null, target = null;
+let face = null, dict = null, infl = null, target = null, avatarRoot = null, baseRot = null;
 new GLTFLoader().load('avatar.glb', (gltf)=>{
   const root = gltf.scene;
+  avatarRoot = root;
+  baseRot = root.rotation.clone();
   root.traverse(o=>{ if(o.isMesh && o.morphTargetInfluences){ face=o; dict=o.morphTargetDictionary; infl=o.morphTargetInfluences; } });
   scene.add(root);
   // frame the head (after Y-up export the face looks toward +Z)
@@ -115,6 +126,8 @@ new GLTFLoader().load('avatar.glb', (gltf)=>{
 
 // ---- lipsync playback ----
 let cues=null, audio=null, playing=false, subWords=[];
+let wantsListen = false, listening = false, busy = false;
+let startListening = ()=>{};
 function currentViseme(t){
   if(!cues) return 'X';
   for(const q of cues){ if(t>=q.start && t<q.end) return q.value; }
@@ -128,7 +141,12 @@ function speak(audioSrc, newCues, text){
   else { replyEl.classList.remove('on'); replyEl.textContent=''; }
   if(audio){ audio.pause(); }
   audio = new Audio(audioSrc);
-  audio.onended = ()=>{ playing=false; set('à toi 🎤'); setTimeout(()=>replyEl.classList.remove('on'), 1400); };
+  audio.onended = ()=>{
+    playing=false;
+    set(wantsListen ? 'écoute…' : 'à toi 🎤');
+    setTimeout(()=>replyEl.classList.remove('on'), 1400);
+    if(wantsListen) startListening();
+  };
   audio.oncanplay = ()=>{
     audio.play().then(()=>{
       playing=true;
@@ -142,6 +160,12 @@ let nextBlink = performance.now()/1000 + 1.5, blinkT = -1;
 let nextBrow = performance.now()/1000 + 3, browT = -1, browVal = 0;
 function idle(now, dt){
   if(!face) return;
+  if(avatarRoot && baseRot){
+    const talk = playing ? 0.014 : 0.008;
+    avatarRoot.rotation.x = baseRot.x + Math.sin(now*0.9) * talk;
+    avatarRoot.rotation.y = baseRot.y + Math.sin(now*0.55) * talk * 1.4;
+    avatarRoot.rotation.z = baseRot.z + Math.sin(now*0.7 + 1.2) * talk * 0.45;
+  }
   // blink
   if(blinkT<0 && now>nextBlink){ blinkT=0; nextBlink=now+2.5+Math.random()*3; }
   let blink=0;
@@ -152,6 +176,9 @@ function idle(now, dt){
   let brow=0;
   if(browT>=0){ browT+=dt; const p=browT/0.9; brow = p<1 ? Math.sin(p*Math.PI)*browVal : (browT=-1,0); }
   setMorph('browUp', brow);
+  if(!playing){
+    setMorph('E', 0.035 + Math.sin(now*1.1)*0.012);
+  }
 }
 function setMorph(name,v){ const i=dict[name]; if(i!==undefined) infl[i]=v; }
 
@@ -224,24 +251,54 @@ const micBtn = document.getElementById('mic');
 if(!SR){ micBtn.disabled=true; micBtn.textContent='🎤 (navigateur non compatible)'; }
 else {
   const rec = new SR(); rec.lang='fr-FR'; rec.interimResults=false; rec.maxAlternatives=1;
-  micBtn.onclick = ()=>{ set('écoute…'); try{ rec.start(); }catch(e){} };
+  startListening = function(){
+    if(!wantsListen || listening || busy || playing) return;
+    set('écoute…');
+    micBtn.textContent = '🎤 Écoute…';
+    try{ rec.start(); }catch(e){}
+  };
+  micBtn.onclick = ()=>{
+    wantsListen = !wantsListen;
+    micBtn.textContent = wantsListen ? '⏸ Stop' : '🎤 Parler';
+    if(wantsListen) startListening();
+    else set('à toi 🎤');
+  };
+  rec.onstart = ()=>{ listening = true; micBtn.textContent = '🎤 Écoute…'; };
+  rec.onend = ()=>{
+    listening = false;
+    if(!busy && !playing){
+      micBtn.textContent = wantsListen ? '🎤 Écoute…' : '🎤 Parler';
+      if(wantsListen) setTimeout(startListening, 250);
+    }
+  };
   rec.onresult = async (ev)=>{
     const text = ev.results[0][0].transcript;
+    busy = true;
+    micBtn.textContent = '…';
+    showHeard(text);
     set('« '+text+' »');
     try{
       set('Nora réfléchit…');
       const llm = await postJson('/api/chat-text', {text, history: history.slice(-8)});
-      replyEl.textContent = llm.reply;
-      replyEl.classList.add('on');
       history.push({role:'user', content:text}, {role:'assistant', content:llm.reply});
       persist();
       set('Nora prépare sa voix…');
       const voice = await postJson('/api/say', {text: llm.reply});
       set('voix prête…');
       speak('data:'+voice.mime+';base64,'+voice.audio, voice.cues, llm.reply);
-    }catch(e){ set('erreur réseau: '+e.message); }
+    }catch(e){
+      set('erreur réseau: '+e.message);
+      if(wantsListen) setTimeout(startListening, 800);
+    } finally {
+      busy = false;
+      if(!playing) micBtn.textContent = wantsListen ? '🎤 Écoute…' : '🎤 Parler';
+    }
   };
-  rec.onerror = (e)=> set('micro: '+e.error);
+  rec.onerror = (e)=>{
+    listening = false;
+    set('micro: '+e.error);
+    if(wantsListen && !busy && !playing) setTimeout(startListening, 800);
+  };
 }
 </script>
 </body>
