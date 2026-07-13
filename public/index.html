@@ -10,6 +10,9 @@
   #ui{position:fixed;left:16px;bottom:16px;display:flex;gap:10px;align-items:center}
   button{background:#e11d48;color:#fff;border:0;padding:10px 18px;border-radius:8px;font-size:15px;cursor:pointer}
   #status{position:fixed;left:16px;top:12px;font-size:13px;opacity:.7}
+  #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,12,16,.55);backdrop-filter:blur(2px)}
+  #start{font-size:18px;padding:16px 30px;border-radius:12px}
+  #start:disabled{opacity:.5;cursor:default}
 </style>
 </head>
 <body>
@@ -20,6 +23,7 @@
   <button id="mic">🎤 Parler</button>
   <button id="play" style="background:#334">▶ Démo « Hello World »</button>
 </div>
+<div id="startOverlay"><button id="start" disabled>chargement…</button></div>
 
 <script type="importmap">
 { "imports": {
@@ -68,7 +72,9 @@ new GLTFLoader().load('avatar.glb', (gltf)=>{
   window.__three = { renderer, scene, camera, face, dict, infl,
                      forceRender:()=>renderer.render(scene,camera),
                      setMorph:(n,v)=>{ if(dict[n]!==undefined) infl[dict[n]]=v; } };
-  set('prêt — clique pour parler ('+Object.keys(dict).length+' morphs)');
+  set('prêt');
+  const sb = document.getElementById('start');
+  sb.disabled = false; sb.textContent = '▶ Démarrer';
 }, undefined, e=>set('erreur glb: '+e));
 
 // ---- lipsync playback ----
@@ -129,6 +135,22 @@ tick();
 document.getElementById('play').onclick = async ()=>{
   const c = (await (await fetch('helloworld.json')).json()).mouthCues;
   speak('helloworld.mp3', c);
+};
+
+// spoken greeting (needs a user gesture to allow audio) -> then mic is ready
+const GREETING = "Bonjour, je suis Nora. Je suis là pour discuter avec vous.";
+async function serverSay(text){
+  const r = await fetch('/api/say', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
+  const data = await r.json();
+  if(data.error) throw new Error(data.error);
+  speak('data:'+data.mime+';base64,'+data.audio, data.cues);
+}
+document.getElementById('start').onclick = async ()=>{
+  document.getElementById('startOverlay').style.display='none';
+  document.getElementById('reply').textContent = GREETING;
+  set('elle parle…');
+  try{ await serverSay(GREETING); }
+  catch(err){ set('accueil indisponible ('+err.message+') — clique 🎤'); }
 };
 
 // ---- voice conversation : mic (STT) -> /api/chat -> speak ----
