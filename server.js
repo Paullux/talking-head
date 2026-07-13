@@ -5,12 +5,13 @@
 // text -> voice -> visemes and the LLM call (key stays server-side).
 
 import express from "express";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 
 const execFileP = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,21 +30,62 @@ const {
 } = process.env;
 
 // ---- text -> voice(wav) -> visemes(cues) --------------------------------
-async function say(text) {
+function shortId() {
+  return randomUUID().slice(0, 8);
+}
+
+function logStep(id, step, extra = "") {
+  console.log(`[${id}] ${step}${extra ? ` ${extra}` : ""}`);
+}
+
+function spawnWithInput(file, args, input, { timeoutMs = 30000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`${file} timeout apres ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    child.on("error", err => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", code => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(`${file} exit ${code}: ${stderr || stdout}`));
+    });
+    child.stdin.end(input);
+  });
+}
+
+async function say(text, id = shortId()) {
   const dir = await mkdtemp(join(tmpdir(), "say-"));
+  const t0 = Date.now();
   try {
     const raw = join(dir, "raw.wav");
     const wav16 = join(dir, "v16.wav");
     // Piper: text on stdin -> wav
-    await execFileP(PIPER_BIN, ["--model", PIPER_VOICE, "--output_file", raw],
-      { input: text, maxBuffer: 64 * 1024 * 1024 });
+    logStep(id, "tts:piper:start", `chars=${text.length}`);
+    await spawnWithInput(PIPER_BIN, ["--model", PIPER_VOICE, "--output_file", raw], text);
+    logStep(id, "tts:piper:ok", `ms=${Date.now() - t0}`);
     // normalise for Rhubarb (mono 16k PCM)
+    logStep(id, "tts:ffmpeg:start");
     await execFileP(FFMPEG_BIN, ["-y", "-i", raw, "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav16]);
+    logStep(id, "tts:ffmpeg:ok", `ms=${Date.now() - t0}`);
     // visemes
+    logStep(id, "lipsync:rhubarb:start");
     const { stdout } = await execFileP(RHUBARB_BIN,
       ["-f", "json", "--extendedShapes", "GHX", wav16], { maxBuffer: 16 * 1024 * 1024 });
     const cues = JSON.parse(stdout).mouthCues;
     const audio = await readFile(raw);
+    logStep(id, "say:ok", `ms=${Date.now() - t0} cues=${cues.length} audio=${audio.length}`);
     return { audio: audio.toString("base64"), mime: "audio/wav", cues };
   } finally {
     rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -51,7 +93,12 @@ async function say(text) {
 }
 
 // ---- external LLM (OpenAI-compatible chat/completions) -------------------
-async function chat(userText, history = []) {
+async function chat(userText, history = [], id = shortId()) {
+  if (!LLM_API_KEY.trim()) {
+    throw new Error("LLM_API_KEY manquante cote serveur");
+  }
+  const t0 = Date.now();
+  logStep(id, "llm:start", `model=${LLM_MODEL} base=${LLM_API_BASE}`);
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     ...history,
@@ -64,7 +111,9 @@ async function chat(userText, history = []) {
   });
   if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
   const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || "…";
+  const reply = data.choices?.[0]?.message?.content?.trim() || "…";
+  logStep(id, "llm:ok", `ms=${Date.now() - t0} chars=${reply.length}`);
+  return reply;
 }
 
 // ---- server -------------------------------------------------------------
@@ -72,20 +121,50 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(join(__dirname, "public")));
 
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/api/health", (_req, res) => res.json({
+  ok: true,
+  llm: {
+    configured: Boolean(LLM_API_KEY.trim()),
+    apiBase: LLM_API_BASE,
+    model: LLM_MODEL,
+    keyPrefix: LLM_API_KEY.trim() ? `${LLM_API_KEY.trim().slice(0, 6)}...` : null,
+  },
+}));
 
 app.post("/api/say", async (req, res) => {
+  const id = shortId();
   try {
-    res.json(await say(String(req.body.text || "").slice(0, 800)));
-  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+    logStep(id, "api:say");
+    res.json(await say(String(req.body.text || "").slice(0, 800), id));
+  } catch (e) {
+    logStep(id, "api:say:error", String(e.message || e));
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/chat-text", async (req, res) => {
+  const id = shortId();
+  try {
+    logStep(id, "api:chat-text");
+    const reply = await chat(String(req.body.text || "").slice(0, 1000), req.body.history || [], id);
+    res.json({ reply });
+  } catch (e) {
+    logStep(id, "api:chat-text:error", String(e.message || e));
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 app.post("/api/chat", async (req, res) => {
+  const id = shortId();
   try {
-    const reply = await chat(String(req.body.text || "").slice(0, 1000), req.body.history || []);
-    const voice = await say(reply);
+    logStep(id, "api:chat");
+    const reply = await chat(String(req.body.text || "").slice(0, 1000), req.body.history || [], id);
+    const voice = await say(reply, id);
     res.json({ reply, ...voice });
-  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  } catch (e) {
+    logStep(id, "api:chat:error", String(e.message || e));
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 app.listen(PORT, () => console.log(`avatar backend on :${PORT}`));

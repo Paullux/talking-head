@@ -62,6 +62,18 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const statusEl = document.getElementById('status');
 const replyEl = document.getElementById('reply');
 const set = t => statusEl.textContent = t;
+async function postJson(url, payload){
+  console.time(url);
+  const r = await fetch(url, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(payload)});
+  const text = await r.text();
+  console.timeEnd(url);
+  console.log(url, r.status, text.slice(0, 240));
+  let data;
+  try { data = JSON.parse(text); }
+  catch(e){ throw new Error('réponse non-JSON HTTP '+r.status+': '+text.slice(0, 160)); }
+  if(!r.ok || data.error) throw new Error(data.error || ('HTTP '+r.status));
+  return data;
+}
 
 // ---- scene ----
 const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true, preserveDrawingBuffer:true});
@@ -173,9 +185,7 @@ document.getElementById('play').onclick = async ()=>{
 // spoken greeting (needs a user gesture to allow audio) -> then mic is ready
 const GREETING = "Bonjour, je suis Nora. Je suis là pour discuter avec vous.";
 async function serverSay(text){
-  const r = await fetch('/api/say', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
-  const data = await r.json();
-  if(data.error) throw new Error(data.error);
+  const data = await postJson('/api/say', {text});
   speak('data:'+data.mime+';base64,'+data.audio, data.cues, text);
 }
 document.getElementById('start').onclick = async ()=>{
@@ -214,12 +224,11 @@ else {
     const text = ev.results[0][0].transcript;
     set('« '+text+' »');
     try{
-      const r = await fetch('/api/chat', {method:'POST', headers:{'content-type':'application/json'},
-        body:JSON.stringify({text, history: history.slice(-8)})});
-      const data = await r.json();
-      if(data.error){ set('erreur: '+data.error); return; }
+      set('Nora réfléchit…');
+      const data = await postJson('/api/chat', {text, history: history.slice(-8)});
       history.push({role:'user', content:text}, {role:'assistant', content:data.reply});
       persist();
+      set('voix prête…');
       speak('data:'+data.mime+';base64,'+data.audio, data.cues, data.reply);
     }catch(e){ set('erreur réseau: '+e.message); }
   };
