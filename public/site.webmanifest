@@ -1,0 +1,17 @@
+{
+  "name": "Nora - Avatar vocal 3D",
+  "short_name": "Nora",
+  "description": "Avatar vocal 3D avec LLM, voix Piper et lip-sync Rhubarb.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#15171c",
+  "theme_color": "#15171c",
+  "icons": [
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

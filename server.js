@@ -138,7 +138,7 @@ app.use(express.static(join(__dirname, "public")));
 
 app.get("/api/health", (_req, res) => res.json({
   ok: true,
-  version: "soft-fill-light-2026-07-13",
+  version: "social-assets-2026-07-13",
   llm: {
     configured: Boolean(LLM_API_KEY.trim()),
     apiBase: LLM_API_BASE,
@@ -149,7 +149,7 @@ app.get("/api/health", (_req, res) => res.json({
 
 app.get("/api/version", (_req, res) => res.json({
   ok: true,
-  version: "soft-fill-light-2026-07-13",
+  version: "social-assets-2026-07-13",
   endpoints: {
     health: "GET /api/health",
     chatText: "POST /api/chat-text",
