@@ -2,7 +2,7 @@
 
 ![Real-time 3D Avatar with Lip Sync](docs/banner.png)
 
-Assistante 3D qui **parle** : micro → LLM (API externe) → voix (Piper) → visèmes (Rhubarb) → lip-sync temps réel dans le navigateur (three.js).
+**Nora** — une assistante 3D qui **parle** : micro → LLM (API externe) → voix (Piper) → visèmes (Rhubarb) → lip-sync temps réel dans le navigateur (three.js).
 
 Le **rendu 3D tourne dans le navigateur du visiteur** (aucune charge GPU serveur). Le container ne fait que : servir le front, la synthèse vocale, les visèmes, et l'appel LLM.
 

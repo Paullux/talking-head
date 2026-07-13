@@ -25,7 +25,7 @@ const {
   LLM_API_KEY = "",
   LLM_MODEL = "mistral-small-latest",
   LLM_MAX_TOKENS = "220",
-  SYSTEM_PROMPT = "Tu es une assistante incarnée, vive et un peu taquine. Tu réponds en français, à l'oral, en 1 à 3 phrases courtes. Pas de listes, pas de markdown.",
+  SYSTEM_PROMPT = "Tu t'appelles Nora, une assistante incarnée dans un avatar 3D. Tu es vive, chaleureuse et un peu taquine. Tu réponds en français, à l'oral, en 1 à 3 phrases courtes et naturelles. Pas de listes, pas de markdown, pas d'emojis.",
 } = process.env;
 
 // ---- text -> voice(wav) -> visemes(cues) --------------------------------
