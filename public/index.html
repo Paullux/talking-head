@@ -13,6 +13,11 @@
   #name{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:26px;font-weight:700;letter-spacing:.06em;
         background:linear-gradient(90deg,#7cc4ff,#b18cff);-webkit-background-clip:text;background-clip:text;color:transparent;
         text-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none}
+  #reply{position:fixed;left:50%;transform:translateX(-50%);bottom:74px;max-width:min(860px,90vw);
+         text-align:center;font-size:22px;line-height:1.35;color:#fff;
+         padding:8px 16px;border-radius:10px;background:rgba(8,10,14,.62);
+         text-shadow:0 1px 3px #000;opacity:0;transition:opacity .25s}
+  #reply.on{opacity:1}
   #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,12,16,.55);backdrop-filter:blur(2px)}
   #start{font-size:18px;padding:16px 30px;border-radius:12px}
   #start:disabled{opacity:.5;cursor:default}
@@ -22,7 +27,7 @@
 <canvas id="c"></canvas>
 <div id="name">Nora</div>
 <div id="status">chargement…</div>
-<div id="reply" style="position:fixed;left:16px;right:16px;bottom:70px;text-align:center;font-size:18px;text-shadow:0 1px 3px #000"></div>
+<div id="reply"></div>
 <div id="ui">
   <button id="mic">🎤 Parler</button>
   <button id="play" style="background:#334">▶ Démo « Hello World »</button>
@@ -41,6 +46,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const statusEl = document.getElementById('status');
+const replyEl = document.getElementById('reply');
 const set = t => statusEl.textContent = t;
 
 // ---- scene ----
@@ -82,18 +88,21 @@ new GLTFLoader().load('avatar.glb', (gltf)=>{
 }, undefined, e=>set('erreur glb: '+e));
 
 // ---- lipsync playback ----
-let cues=null, audio=null, playing=false;
+let cues=null, audio=null, playing=false, subWords=[];
 function currentViseme(t){
   if(!cues) return 'X';
   for(const q of cues){ if(t>=q.start && t<q.end) return q.value; }
   return 'X';
 }
-// play an audio clip (url or data-uri) and drive morphs from its viseme cues
-function speak(audioSrc, newCues){
+// play an audio clip (url or data-uri), drive morphs from cues, show subtitles
+function speak(audioSrc, newCues, text){
   cues = newCues;
+  subWords = (text||'').split(/\s+/).filter(Boolean);
+  if(subWords.length){ replyEl.textContent=''; replyEl.classList.add('on'); }
+  else { replyEl.classList.remove('on'); replyEl.textContent=''; }
   if(audio){ audio.pause(); }
   audio = new Audio(audioSrc);
-  audio.onended = ()=>{ playing=false; set('à toi 🎤'); };
+  audio.onended = ()=>{ playing=false; set('à toi 🎤'); setTimeout(()=>replyEl.classList.remove('on'), 1400); };
   audio.oncanplay = ()=>{ audio.play(); playing=true; set('elle parle…'); };
 }
 
@@ -126,6 +135,12 @@ function tick(){
     if(playing && !audio.paused){
       const v = currentViseme(audio.currentTime);
       if(v!=='X' && dict[v]!==undefined) target[dict[v]] = 1;
+      // reveal subtitles proportionally to audio progress
+      if(subWords.length && audio.duration){
+        const n = Math.max(1, Math.ceil(Math.min(1,audio.currentTime/audio.duration)*subWords.length));
+        const shown = subWords.slice(0,n).join(' ');
+        if(replyEl.textContent!==shown) replyEl.textContent = shown;
+      }
     }
     // smooth toward target (co-articulation), but leave idle morphs to idle()
     for(const v of VIS){ const i=dict[v]; infl[i] += (target[i]-infl[i]) * Math.min(1, dt*18); }
@@ -138,7 +153,7 @@ tick();
 // demo button (static Hello World clip)
 document.getElementById('play').onclick = async ()=>{
   const c = (await (await fetch('helloworld.json')).json()).mouthCues;
-  speak('helloworld.mp3', c);
+  speak('helloworld.mp3', c, 'Hello World.');
 };
 
 // spoken greeting (needs a user gesture to allow audio) -> then mic is ready
@@ -147,34 +162,30 @@ async function serverSay(text){
   const r = await fetch('/api/say', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
   const data = await r.json();
   if(data.error) throw new Error(data.error);
-  speak('data:'+data.mime+';base64,'+data.audio, data.cues);
+  speak('data:'+data.mime+';base64,'+data.audio, data.cues, text);
 }
 document.getElementById('start').onclick = async ()=>{
   document.getElementById('startOverlay').style.display='none';
-  document.getElementById('reply').textContent = GREETING;
   set('elle parle…');
   try{ await serverSay(GREETING); }
   catch(err){ set('accueil indisponible ('+err.message+') — clique 🎤'); }
 };
 
 // ---- voice conversation : mic (STT) -> /api/chat -> speak ----
-const replyEl = document.getElementById('reply');
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const micBtn = document.getElementById('mic');
 if(!SR){ micBtn.disabled=true; micBtn.textContent='🎤 (navigateur non compatible)'; }
 else {
   const rec = new SR(); rec.lang='fr-FR'; rec.interimResults=false; rec.maxAlternatives=1;
-  micBtn.onclick = ()=>{ set('écoute…'); replyEl.textContent=''; try{ rec.start(); }catch(e){} };
+  micBtn.onclick = ()=>{ set('écoute…'); try{ rec.start(); }catch(e){} };
   rec.onresult = async (ev)=>{
     const text = ev.results[0][0].transcript;
-    replyEl.textContent = '« '+text+' »';
-    set('elle réfléchit…');
+    set('« '+text+' »');
     try{
       const r = await fetch('/api/chat', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
       const data = await r.json();
       if(data.error){ set('erreur: '+data.error); return; }
-      replyEl.textContent = data.reply;
-      speak('data:'+data.mime+';base64,'+data.audio, data.cues);
+      speak('data:'+data.mime+';base64,'+data.audio, data.cues, data.reply);
     }catch(e){ set('erreur réseau: '+e.message); }
   };
   rec.onerror = (e)=> set('micro: '+e.error);
