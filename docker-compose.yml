@@ -1,0 +1,13 @@
+services:
+  avatar:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      LLM_API_BASE: ${LLM_API_BASE:-https://api.openai.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-220}
+      SYSTEM_PROMPT: ${SYSTEM_PROMPT:-}
+      PORT: 3000
+    restart: unless-stopped

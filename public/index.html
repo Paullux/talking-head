@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar lipsync — three.js</title>
+<style>
+  html,body{margin:0;height:100%;background:#15171c;color:#ddd;font-family:system-ui,sans-serif;overflow:hidden}
+  #c{display:block;width:100vw;height:100vh}
+  #ui{position:fixed;left:16px;bottom:16px;display:flex;gap:10px;align-items:center}
+  button{background:#e11d48;color:#fff;border:0;padding:10px 18px;border-radius:8px;font-size:15px;cursor:pointer}
+  #status{position:fixed;left:16px;top:12px;font-size:13px;opacity:.7}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="status">chargement…</div>
+<div id="reply" style="position:fixed;left:16px;right:16px;bottom:70px;text-align:center;font-size:18px;text-shadow:0 1px 3px #000"></div>
+<div id="ui">
+  <button id="mic">🎤 Parler</button>
+  <button id="play" style="background:#334">▶ Démo « Hello World »</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/addons/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const statusEl = document.getElementById('status');
+const set = t => statusEl.textContent = t;
+
+// ---- scene ----
+const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true, preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x15171c);
+const camera = new THREE.PerspectiveCamera(28, innerWidth/innerHeight, 0.01, 100);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x333340, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(-1,1.4,2); scene.add(key);
+const fill = new THREE.DirectionalLight(0xbbd0ff, 0.6); fill.position.set(1.5,0.3,1.2); scene.add(fill);
+
+function resize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
+addEventListener('resize', resize); resize();
+
+// ---- load avatar ----
+let face = null, dict = null, infl = null, target = null;
+new GLTFLoader().load('avatar.glb', (gltf)=>{
+  const root = gltf.scene;
+  root.traverse(o=>{ if(o.isMesh && o.morphTargetInfluences){ face=o; dict=o.morphTargetDictionary; infl=o.morphTargetInfluences; } });
+  scene.add(root);
+  // frame the head (after Y-up export the face looks toward +Z)
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const headY = box.min.y + size.y*0.82;
+  const dist = size.y*0.55 / Math.tan(THREE.MathUtils.degToRad(camera.fov*0.5));
+  camera.position.set(c.x, headY, box.max.z + dist);
+  camera.lookAt(c.x, headY, c.z);
+  target = new Float32Array(infl.length);
+  window.__dbg = { box, size, center:c, camPos:camera.position.clone(), morphs:Object.keys(dict), meshName:face.name };
+  window.__three = { renderer, scene, camera, face, dict, infl,
+                     forceRender:()=>renderer.render(scene,camera),
+                     setMorph:(n,v)=>{ if(dict[n]!==undefined) infl[dict[n]]=v; } };
+  set('prêt — clique pour parler ('+Object.keys(dict).length+' morphs)');
+}, undefined, e=>set('erreur glb: '+e));
+
+// ---- lipsync playback ----
+let cues=null, audio=null, playing=false;
+function currentViseme(t){
+  if(!cues) return 'X';
+  for(const q of cues){ if(t>=q.start && t<q.end) return q.value; }
+  return 'X';
+}
+// play an audio clip (url or data-uri) and drive morphs from its viseme cues
+function speak(audioSrc, newCues){
+  cues = newCues;
+  if(audio){ audio.pause(); }
+  audio = new Audio(audioSrc);
+  audio.onended = ()=>{ playing=false; set('à toi 🎤'); };
+  audio.oncanplay = ()=>{ audio.play(); playing=true; set('elle parle…'); };
+}
+
+// ---- idle (blink + occasional brow) ----
+let nextBlink = performance.now()/1000 + 1.5, blinkT = -1;
+let nextBrow = performance.now()/1000 + 3, browT = -1, browVal = 0;
+function idle(now, dt){
+  if(!face) return;
+  // blink
+  if(blinkT<0 && now>nextBlink){ blinkT=0; nextBlink=now+2.5+Math.random()*3; }
+  let blink=0;
+  if(blinkT>=0){ blinkT+=dt; const p=blinkT/0.16; blink = p<1 ? Math.sin(p*Math.PI) : (blinkT=-1,0); }
+  setMorph('blink', blink);
+  // brow
+  if(browT<0 && now>nextBrow){ browT=0; browVal=0.5+Math.random()*0.5; nextBrow=now+4+Math.random()*5; }
+  let brow=0;
+  if(browT>=0){ browT+=dt; const p=browT/0.9; brow = p<1 ? Math.sin(p*Math.PI)*browVal : (browT=-1,0); }
+  setMorph('browUp', brow);
+}
+function setMorph(name,v){ const i=dict[name]; if(i!==undefined) infl[i]=v; }
+
+const VIS = ['A','B','C','D','E','F','G','H'];
+let last = performance.now();
+function tick(){
+  requestAnimationFrame(tick);
+  const now = performance.now()/1000, dt = Math.min(0.05,(performance.now()-last)/1000); last=performance.now();
+  if(face){
+    // desired viseme influence
+    target.fill(0);
+    if(playing && !audio.paused){
+      const v = currentViseme(audio.currentTime);
+      if(v!=='X' && dict[v]!==undefined) target[dict[v]] = 1;
+    }
+    // smooth toward target (co-articulation), but leave idle morphs to idle()
+    for(const v of VIS){ const i=dict[v]; infl[i] += (target[i]-infl[i]) * Math.min(1, dt*18); }
+    idle(now, dt);
+  }
+  renderer.render(scene,camera);
+}
+tick();
+
+// demo button (static Hello World clip)
+document.getElementById('play').onclick = async ()=>{
+  const c = (await (await fetch('helloworld.json')).json()).mouthCues;
+  speak('helloworld.mp3', c);
+};
+
+// ---- voice conversation : mic (STT) -> /api/chat -> speak ----
+const replyEl = document.getElementById('reply');
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = document.getElementById('mic');
+if(!SR){ micBtn.disabled=true; micBtn.textContent='🎤 (navigateur non compatible)'; }
+else {
+  const rec = new SR(); rec.lang='fr-FR'; rec.interimResults=false; rec.maxAlternatives=1;
+  micBtn.onclick = ()=>{ set('écoute…'); replyEl.textContent=''; try{ rec.start(); }catch(e){} };
+  rec.onresult = async (ev)=>{
+    const text = ev.results[0][0].transcript;
+    replyEl.textContent = '« '+text+' »';
+    set('elle réfléchit…');
+    try{
+      const r = await fetch('/api/chat', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({text})});
+      const data = await r.json();
+      if(data.error){ set('erreur: '+data.error); return; }
+      replyEl.textContent = data.reply;
+      speak('data:'+data.mime+';base64,'+data.audio, data.cues);
+    }catch(e){ set('erreur réseau: '+e.message); }
+  };
+  rec.onerror = (e)=> set('micro: '+e.error);
+}
+</script>
+</body>
+</html>
