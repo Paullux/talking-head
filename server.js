@@ -123,12 +123,37 @@ app.use(express.static(join(__dirname, "public")));
 
 app.get("/api/health", (_req, res) => res.json({
   ok: true,
+  version: "diag-2026-07-13",
   llm: {
     configured: Boolean(LLM_API_KEY.trim()),
     apiBase: LLM_API_BASE,
     model: LLM_MODEL,
     keyPrefix: LLM_API_KEY.trim() ? `${LLM_API_KEY.trim().slice(0, 6)}...` : null,
   },
+}));
+
+app.get("/api/version", (_req, res) => res.json({
+  ok: true,
+  version: "diag-2026-07-13",
+  endpoints: {
+    health: "GET /api/health",
+    chatText: "POST /api/chat-text",
+    say: "POST /api/say",
+    chat: "POST /api/chat",
+    diagnosticPage: "GET /_diag.html",
+  },
+}));
+
+app.get("/api/say", (_req, res) => res.status(405).json({
+  error: "Utilise POST /api/say avec JSON {\"text\":\"Bonjour\"}",
+}));
+
+app.get("/api/chat", (_req, res) => res.status(405).json({
+  error: "Utilise POST /api/chat avec JSON {\"text\":\"Bonjour\",\"history\":[]}",
+}));
+
+app.get("/api/chat-text", (_req, res) => res.status(405).json({
+  error: "Utilise POST /api/chat-text avec JSON {\"text\":\"Bonjour\",\"history\":[]}",
 }));
 
 app.post("/api/say", async (req, res) => {

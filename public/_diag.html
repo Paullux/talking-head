@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nora diagnostic</title>
+<style>
+  :root{color-scheme:dark;--bg:#101216;--panel:#191d24;--line:#303746;--text:#eef2f7;--muted:#9aa7b8;--ok:#22c55e;--bad:#fb7185;--wait:#facc15}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,sans-serif}
+  main{max-width:1120px;margin:0 auto;padding:24px}
+  h1{font-size:24px;margin:0 0 18px}
+  textarea{width:100%;min-height:86px;resize:vertical;background:#0c0f14;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font:14px/1.4 ui-monospace,Consolas,monospace}
+  button{margin-top:10px;background:#e11d48;color:white;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:700}
+  button:disabled{opacity:.55;cursor:default}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:16px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;min-height:120px}
+  h2{font-size:15px;margin:0 0 10px;color:#dce7f7}
+  .state{display:inline-block;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700;background:#374151;color:#d1d5db}
+  .ok{background:rgba(34,197,94,.18);color:var(--ok)}
+  .bad{background:rgba(251,113,133,.18);color:var(--bad)}
+  .wait{background:rgba(250,204,21,.18);color:var(--wait)}
+  pre{white-space:pre-wrap;word-break:break-word;background:#0c0f14;border:1px solid #242a35;border-radius:6px;padding:10px;max-height:280px;overflow:auto;font-size:12px;line-height:1.45}
+  audio{width:100%;margin-top:10px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td,th{border-bottom:1px solid #2a313d;padding:5px;text-align:left}
+  .muted{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Diagnostic Nora</h1>
+  <p class="muted">Page cachée. Teste la chaîne séparément : LLM -> TTS -> Rhubarb -> morph targets.</p>
+  <textarea id="prompt">Dis bonjour en une phrase courte.</textarea>
+  <button id="run">Lancer le diagnostic</button>
+
+  <div class="grid">
+    <section>
+      <h2>1. Envoi LLM <span id="llmReqState" class="state">attente</span></h2>
+      <pre id="llmReq"></pre>
+    </section>
+    <section>
+      <h2>2. Réponse LLM <span id="llmResState" class="state">attente</span></h2>
+      <pre id="llmRes"></pre>
+    </section>
+    <section>
+      <h2>3. Son TTS <span id="ttsState" class="state">attente</span></h2>
+      <div id="ttsInfo" class="muted"></div>
+      <audio id="audio" controls></audio>
+      <pre id="ttsRaw"></pre>
+    </section>
+    <section>
+      <h2>4. Rhubarb / Visèmes <span id="cueState" class="state">attente</span></h2>
+      <div id="cueInfo" class="muted"></div>
+      <div id="cueTable"></div>
+    </section>
+    <section>
+      <h2>5. Animation GLB <span id="animState" class="state">attente</span></h2>
+      <pre id="animInfo"></pre>
+    </section>
+    <section>
+      <h2>6. Résumé <span id="sumState" class="state">attente</span></h2>
+      <pre id="summary"></pre>
+    </section>
+  </div>
+</main>
+
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/addons/"
+}}
+</script>
+
+<script type="module">
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const $ = id => document.getElementById(id);
+const requiredVisemes = ['A','B','C','D','E','F','G','H'];
+
+function setState(id, state, label){
+  const el = $(id);
+  el.className = 'state ' + state;
+  el.textContent = label;
+}
+
+function pretty(value){
+  return JSON.stringify(value, null, 2);
+}
+
+async function postJson(url, payload, timeoutMs = 45000){
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const t0 = performance.now();
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'content-type':'application/json'},
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch { data = { raw: text }; }
+    return { ok: res.ok && !data.error, status: res.status, ms: Math.round(performance.now() - t0), data };
+  } catch (err) {
+    return { ok: false, status: 0, ms: Math.round(performance.now() - t0), data: { error: err.name === 'AbortError' ? 'timeout' : err.message } };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function checkAnimation(){
+  return new Promise(resolve => {
+    new GLTFLoader().load('avatar.glb', gltf => {
+      const meshes = [];
+      gltf.scene.traverse(obj => {
+        if (obj.isMesh && obj.morphTargetDictionary) {
+          meshes.push({ name: obj.name || '(mesh)', morphs: Object.keys(obj.morphTargetDictionary) });
+        }
+      });
+      const allMorphs = new Set(meshes.flatMap(m => m.morphs));
+      const missing = requiredVisemes.filter(v => !allMorphs.has(v));
+      resolve({ ok: missing.length === 0, meshes, requiredVisemes, missing });
+    }, undefined, err => resolve({ ok: false, error: String(err.message || err) }));
+  });
+}
+
+function renderCues(cues){
+  if (!Array.isArray(cues) || cues.length === 0) return '<p class="muted">Aucun visème reçu.</p>';
+  const rows = cues.slice(0, 120).map(c => `<tr><td>${c.value}</td><td>${c.start}</td><td>${c.end}</td></tr>`).join('');
+  return `<table><thead><tr><th>Visème</th><th>Début</th><th>Fin</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+$('run').onclick = async () => {
+  $('run').disabled = true;
+  $('summary').textContent = '';
+  ['llmReqState','llmResState','ttsState','cueState','animState','sumState'].forEach(id => setState(id, 'wait', 'test'));
+
+  const prompt = $('prompt').value.trim() || 'Dis bonjour.';
+  const llmPayload = { text: prompt, history: [] };
+  $('llmReq').textContent = pretty({ endpoint: '/api/chat-text', method: 'POST', body: llmPayload });
+
+  const llm = await postJson('/api/chat-text', llmPayload, 45000);
+  setState('llmReqState', llm.ok ? 'ok' : 'bad', llm.ok ? 'ok' : 'erreur');
+  setState('llmResState', llm.ok ? 'ok' : 'bad', `${llm.status || 'ERR'} / ${llm.ms}ms`);
+  $('llmRes').textContent = pretty(llm);
+
+  const spokenText = llm.data.reply || prompt;
+  const sayPayload = { text: spokenText };
+  const say = await postJson('/api/say', sayPayload, 60000);
+
+  setState('ttsState', say.ok ? 'ok' : 'bad', `${say.status || 'ERR'} / ${say.ms}ms`);
+  $('ttsRaw').textContent = say.ok ? '' : pretty(say);
+  if (say.ok && say.data.audio) {
+    const audioUrl = `data:${say.data.mime};base64,${say.data.audio}`;
+    $('audio').src = audioUrl;
+    $('ttsInfo').textContent = `${say.data.mime}, base64 ${say.data.audio.length} caractères`;
+  } else {
+    $('audio').removeAttribute('src');
+    $('ttsInfo').textContent = say.data.error || 'Audio absent';
+  }
+
+  const cues = say.data.cues || [];
+  setState('cueState', say.ok && cues.length ? 'ok' : 'bad', cues.length ? `${cues.length} cues` : 'absent');
+  $('cueInfo').textContent = [...new Set(cues.map(c => c.value))].join(', ');
+  $('cueTable').innerHTML = renderCues(cues);
+
+  const anim = await checkAnimation();
+  setState('animState', anim.ok ? 'ok' : 'bad', anim.ok ? 'ok' : 'morphs manquants');
+  $('animInfo').textContent = pretty(anim);
+
+  const summary = {
+    llm_ok: llm.ok,
+    tts_ok: say.ok && Boolean(say.data.audio),
+    rhubarb_ok: cues.length > 0,
+    animation_ok: anim.ok,
+    chain_ok: llm.ok && say.ok && cues.length > 0 && anim.ok,
+  };
+  setState('sumState', summary.chain_ok ? 'ok' : 'bad', summary.chain_ok ? 'ok' : 'à corriger');
+  $('summary').textContent = pretty(summary);
+  $('run').disabled = false;
+};
+</script>
+</body>
+</html>
