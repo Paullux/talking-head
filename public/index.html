@@ -380,7 +380,6 @@ else {
   rec.onstart = ()=>{
     listening = true;
     micBtn.textContent = '🎤 Écoute…';
-    replyEl.classList.remove('on');
   };
   rec.onend = ()=>{
     listening = false;
@@ -393,6 +392,7 @@ else {
     const text = ev.results[0][0].transcript;
     busy = true;
     micBtn.textContent = '…';
+    replyEl.classList.remove('on');
     showHeard(text);
     set('« '+text+' »');
     try{
