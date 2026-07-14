@@ -38,9 +38,9 @@
   #c{position:fixed;inset:0;z-index:1;display:block;width:100vw;height:100vh}
   #ui{position:fixed;left:calc(16px + var(--sal));right:calc(16px + var(--sar));
       bottom:calc(16px + var(--sab) + var(--rgpd-h));transition:bottom .2s;
-      display:flex;flex-wrap:wrap;gap:10px;align-items:center;z-index:3}
+      display:grid;grid-template-columns:repeat(4,max-content);gap:10px;align-items:center;justify-content:start;z-index:3}
   button{background:#e11d48;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-size:15px;cursor:pointer;
-         min-height:44px;flex:0 1 auto}
+         min-height:44px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #status{position:fixed;left:calc(16px + var(--sal));top:calc(12px + var(--sat));font-size:13px;opacity:.7;z-index:3;
           max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #heard{position:fixed;left:calc(16px + var(--sal));top:calc(36px + var(--sat));max-width:min(520px,70vw);
@@ -77,14 +77,15 @@
     #reply{font-size:17px;bottom:calc(64px + var(--sab));padding:7px 12px}
     #heard{font-size:13px;max-width:min(300px,62vw)}
     #status{font-size:12px}
-    #ui{bottom:calc(12px + var(--sab) + var(--rgpd-h));left:calc(12px + var(--sal));right:calc(12px + var(--sar));gap:8px}
-    #ui button{font-size:13px;padding:11px 14px;flex:1 1 auto}
+    #ui{bottom:calc(12px + var(--sab) + var(--rgpd-h));left:calc(12px + var(--sal));right:calc(12px + var(--sar));
+        gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
+    #ui button{font-size:13px;padding:11px 12px;width:100%}
     #prefs{font-size:12px;max-width:min(160px,46vw)}
     #prefs label{padding:5px 8px}
     #rgpd{font-size:12px;padding-left:calc(14px + var(--sal));padding-right:calc(14px + var(--sar))}
   }
-  @media (max-width: 380px){
-    #ui{flex-direction:column;align-items:stretch}
+  @media (max-width: 330px){
+    #ui{grid-template-columns:1fr}
     #ui button{width:100%}
   }
 </style>
@@ -98,7 +99,10 @@
 <div id="reply"></div>
 <div id="ui">
   <button id="mic">🎤 Parler</button>
+  <button id="imageBtn" style="background:#334">🖼 Image</button>
+  <button id="linkBtn" style="background:#334">🔗 Lien</button>
   <button id="play" style="background:#334">▶ Démo « Hello World »</button>
+  <input type="file" id="imageInput" accept="image/*" hidden>
 </div>
 <div id="prefs">
   <label><input type="checkbox" id="saveChk"> Enregistrer ce que l'on dit</label>
@@ -340,6 +344,71 @@ document.getElementById('clearBtn').onclick = ()=>{
   localStorage.removeItem(HKEY);
   localStorage.removeItem(CKEY);
   set('historique effacé');
+};
+
+function fileToDataUrl(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = ()=>reject(reader.error || new Error('lecture image impossible'));
+    reader.readAsDataURL(file);
+  });
+}
+async function analyzeWithNora({endpoint, payload, userLabel, memoryText}){
+  busy = true;
+  replyEl.classList.remove('on');
+  showHeard(userLabel);
+  set('Nora analyse…');
+  try{
+    const llm = await postJson(endpoint, {...payload, history: buildContext()});
+    history.push({role:'user', content: memoryText}, {role:'assistant', content: llm.reply});
+    persist();
+    scheduleCompact();
+    set('Nora prépare sa voix…');
+    const voice = await postJson('/api/say', {text: llm.reply});
+    set('voix prête…');
+    speak('data:'+voice.mime+';base64,'+voice.audio, voice.cues, llm.reply);
+  }catch(e){
+    set('analyse impossible: '+e.message);
+  }finally{
+    busy = false;
+    if(!playing) micBtn.textContent = wantsListen ? '🎤 Écoute…' : '🎤 Parler';
+  }
+}
+
+const imageInput = document.getElementById('imageInput');
+document.getElementById('imageBtn').onclick = ()=>imageInput.click();
+imageInput.onchange = async ()=>{
+  const file = imageInput.files && imageInput.files[0];
+  imageInput.value = '';
+  if(!file) return;
+  if(!file.type.startsWith('image/')) return set('fichier image attendu');
+  if(file.size > 5_000_000) return set('image trop grande (max 5 Mo)');
+  const prompt = window.prompt('Que veux-tu demander à Nora sur cette image ?', "Qu'est-ce que tu vois ?");
+  if(prompt === null) return;
+  try{
+    const image = await fileToDataUrl(file);
+    await analyzeWithNora({
+      endpoint: '/api/analyze-image',
+      payload: {image, prompt},
+      userLabel: 'Image : '+file.name,
+      memoryText: '[Image envoyée: '+file.name+'] '+(prompt || 'Analyse cette image.'),
+    });
+  }catch(e){
+    set('image: '+e.message);
+  }
+};
+document.getElementById('linkBtn').onclick = async ()=>{
+  const url = window.prompt('Lien à analyser par Nora');
+  if(!url) return;
+  const prompt = window.prompt('Que veux-tu demander à Nora sur ce lien ?', 'Analyse ce lien.');
+  if(prompt === null) return;
+  await analyzeWithNora({
+    endpoint: '/api/analyze-link',
+    payload: {url, prompt},
+    userLabel: 'Lien : '+url,
+    memoryText: '[Lien envoyé: '+url+'] '+(prompt || 'Analyse ce lien.'),
+  });
 };
 // RGPD banner (once) -- while shown, push the bottom UI/subtitles above it
 // (measured, not guessed: the banner's text wraps differently per viewport).

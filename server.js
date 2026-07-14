@@ -26,10 +26,12 @@ const {
   LLM_API_BASE = "https://api.mistral.ai/v1",
   LLM_API_KEY = "",
   LLM_MODEL = "mistral-small-latest",
+  LLM_VISION_MODEL = "",
   LLM_MAX_TOKENS = "220",
   SYSTEM_PROMPT = "Tu t'appelles Nora, une assistante incarnée dans un avatar 3D. Tu es vive, chaleureuse et un peu taquine. Tu réponds en français, à l'oral, en 1 à 3 phrases courtes et naturelles. Pas de listes, pas de markdown, pas d'emojis.",
   DIAG_PASSWORD = "",
 } = process.env;
+const VISION_MODEL = LLM_VISION_MODEL || LLM_MODEL;
 
 // max simultaneous Piper/Rhubarb pipelines — this VPS has 1 vCPU, so
 // running several at once degrades everyone instead of queuing fairly.
@@ -161,12 +163,115 @@ async function compactMemory(summary = "", history = [], id = shortId()) {
   return compact;
 }
 
+function assertSafePublicUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); }
+  catch { throw new Error("URL invalide"); }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Seules les URLs http(s) sont acceptées");
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    /^169\.254\./.test(host)
+  ) {
+    throw new Error("URL locale ou privée refusée");
+  }
+  return parsed.toString();
+}
+
+function normalizeImageDataUrl(dataUrl) {
+  const value = String(dataUrl || "");
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=\r\n]+$/i.test(value)) {
+    throw new Error("Image invalide: formats acceptés png, jpeg, webp ou gif");
+  }
+  if (value.length > 7_000_000) {
+    throw new Error("Image trop grande: limite environ 5 Mo");
+  }
+  return value;
+}
+
+async function analyzeImage({ imageUrl, prompt = "", history = [] }, id = shortId()) {
+  if (!LLM_API_KEY.trim()) {
+    throw new Error("LLM_API_KEY manquante cote serveur");
+  }
+  const t0 = Date.now();
+  const safePrompt = String(prompt || "").slice(0, 700) || "Analyse cette image en français.";
+  logStep(id, "vision:start", `model=${VISION_MODEL}`);
+  const messages = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...history,
+    {
+      role: "user",
+      content: [
+        { type: "text", text: `${safePrompt}\nRéponds comme Nora, en 1 à 3 phrases naturelles.` },
+        { type: "image_url", image_url: imageUrl },
+      ],
+    },
+  ];
+  const res = await fetch(`${LLM_API_BASE}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${LLM_API_KEY}` },
+    body: JSON.stringify({ model: VISION_MODEL, messages, max_tokens: Number(LLM_MAX_TOKENS), temperature: 0.6 }),
+  });
+  if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  const reply = data.choices?.[0]?.message?.content?.trim() || "Je n'arrive pas à lire cette image.";
+  logStep(id, "vision:ok", `ms=${Date.now() - t0} chars=${reply.length}`);
+  return reply;
+}
+
+function htmlToPlainText(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function analyzeLink({ url, prompt = "", history = [] }, id = shortId()) {
+  const safeUrl = assertSafePublicUrl(url);
+  logStep(id, "link:fetch", safeUrl.slice(0, 120));
+  const response = await fetch(safeUrl, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(10_000),
+    headers: { "user-agent": "Nora/0.1 link analyzer" },
+  });
+  if (!response.ok) throw new Error(`URL HTTP ${response.status}`);
+  const type = (response.headers.get("content-type") || "").toLowerCase();
+  if (type.startsWith("image/")) {
+    return analyzeImage({ imageUrl: safeUrl, prompt, history }, id);
+  }
+  const html = await response.text();
+  const text = htmlToPlainText(html).slice(0, 40_000);
+  if (!text) throw new Error("Aucun texte lisible trouvé dans ce lien");
+  const userText = [
+    String(prompt || "Analyse ce lien en français.").slice(0, 700),
+    "Contenu du lien:",
+    text,
+  ].join("\n\n");
+  return chat(userText.slice(0, 10_000), history, id);
+}
+
 // ---- server -------------------------------------------------------------
 const app = express();
 // behind Coolify/Traefik: trust the proxy's X-Forwarded-For so rate-limiting
 // (and req.ip generally) sees the real client IP, not the proxy's.
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "8mb" }));
 app.use((req, res, next) => {
   if (req.path === "/" || req.path.endsWith(".html")) {
     res.setHeader("Cache-Control", "no-store");
@@ -231,6 +336,8 @@ app.get("/api/version", (_req, res) => res.json({
     health: "GET /api/health",
     chatText: "POST /api/chat-text",
     compact: "POST /api/compact",
+    analyzeImage: "POST /api/analyze-image",
+    analyzeLink: "POST /api/analyze-link",
     say: "POST /api/say",
     chat: "POST /api/chat",
     diagnosticPage: "GET /_diag.html",
@@ -251,6 +358,14 @@ app.get("/api/chat-text", (_req, res) => res.status(405).json({
 
 app.get("/api/compact", (_req, res) => res.status(405).json({
   error: "Utilise POST /api/compact avec JSON {\"summary\":\"...\",\"history\":[]}",
+}));
+
+app.get("/api/analyze-image", (_req, res) => res.status(405).json({
+  error: "Utilise POST /api/analyze-image avec JSON {\"image\":\"data:image/...\",\"prompt\":\"...\",\"history\":[]}",
+}));
+
+app.get("/api/analyze-link", (_req, res) => res.status(405).json({
+  error: "Utilise POST /api/analyze-link avec JSON {\"url\":\"https://...\",\"prompt\":\"...\",\"history\":[]}",
 }));
 
 app.post("/api/say", heavyBurst, heavySustained, concurrencyGuard, async (req, res) => {
@@ -288,6 +403,38 @@ app.post("/api/compact", lightBurst, lightSustained, async (req, res) => {
     res.json({ summary });
   } catch (e) {
     logStep(id, "api:compact:error", String(e.message || e));
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/analyze-image", lightBurst, lightSustained, async (req, res) => {
+  const id = shortId();
+  try {
+    logStep(id, "api:analyze-image");
+    const reply = await analyzeImage({
+      imageUrl: normalizeImageDataUrl(req.body.image),
+      prompt: req.body.prompt,
+      history: Array.isArray(req.body.history) ? req.body.history : [],
+    }, id);
+    res.json({ reply });
+  } catch (e) {
+    logStep(id, "api:analyze-image:error", String(e.message || e));
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/analyze-link", lightBurst, lightSustained, async (req, res) => {
+  const id = shortId();
+  try {
+    logStep(id, "api:analyze-link");
+    const reply = await analyzeLink({
+      url: req.body.url,
+      prompt: req.body.prompt,
+      history: Array.isArray(req.body.history) ? req.body.history : [],
+    }, id);
+    res.json({ reply });
+  } catch (e) {
+    logStep(id, "api:analyze-link:error", String(e.message || e));
     res.status(500).json({ error: String(e.message || e) });
   }
 });
