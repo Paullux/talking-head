@@ -28,7 +28,7 @@
   :root{
     --sat:env(safe-area-inset-top,0px); --sar:env(safe-area-inset-right,0px);
     --sab:env(safe-area-inset-bottom,0px); --sal:env(safe-area-inset-left,0px);
-    --rgpd-h:0px;
+    --rgpd-h:0px; --ui-h:44px; --ui-gap:16px; --reply-gap:14px;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#15171c;color:#ddd;font-family:system-ui,sans-serif;overflow:hidden}
@@ -37,7 +37,7 @@
   #bg::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(6,7,10,.5),rgba(6,7,10,.18) 42%,rgba(6,7,10,.46));pointer-events:none}
   #c{position:fixed;inset:0;z-index:1;display:block;width:100vw;height:100vh}
   #ui{position:fixed;left:calc(16px + var(--sal));right:calc(16px + var(--sar));
-      bottom:calc(16px + var(--sab) + var(--rgpd-h));transition:bottom .2s;
+      bottom:calc(var(--ui-gap) + var(--sab) + var(--rgpd-h));transition:bottom .2s;
       display:grid;grid-template-columns:repeat(4,max-content);gap:10px;align-items:center;justify-content:start;z-index:3}
   button{background:#e11d48;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-size:15px;cursor:pointer;
          min-height:44px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -50,8 +50,11 @@
   #name{position:fixed;top:calc(14px + var(--sat));left:0;right:0;text-align:center;font-size:26px;font-weight:700;
         letter-spacing:.06em;background:linear-gradient(90deg,#7cc4ff,#b18cff);-webkit-background-clip:text;
         background-clip:text;color:transparent;text-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none;z-index:3}
-  #reply{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(74px + var(--sab) + var(--rgpd-h));
+  #reply{position:fixed;left:50%;transform:translateX(-50%);
+         bottom:calc(var(--ui-gap) + var(--ui-h) + var(--reply-gap) + var(--sab) + var(--rgpd-h));
          max-width:min(860px,90vw);text-align:center;font-size:22px;line-height:1.35;color:#fff;
+         max-height:calc(100vh - var(--sat) - var(--sab) - var(--rgpd-h) - var(--ui-h) - var(--ui-gap) - var(--reply-gap) - 90px);
+         overflow-y:auto;overflow-wrap:anywhere;
          padding:8px 16px;border-radius:10px;background:rgba(8,10,14,.62);
          text-shadow:0 1px 3px #000;opacity:0;transition:opacity .25s, bottom .2s;z-index:3}
   #reply.on{opacity:1}
@@ -73,11 +76,12 @@
   #start:disabled{opacity:.5;cursor:default}
 
   @media (max-width: 640px){
+    :root{--ui-gap:12px;--reply-gap:10px}
     #name{font-size:20px}
-    #reply{font-size:17px;bottom:calc(64px + var(--sab));padding:7px 12px}
+    #reply{font-size:17px;padding:7px 12px}
     #heard{font-size:13px;max-width:min(300px,62vw)}
     #status{font-size:12px}
-    #ui{bottom:calc(12px + var(--sab) + var(--rgpd-h));left:calc(12px + var(--sal));right:calc(12px + var(--sar));
+    #ui{left:calc(12px + var(--sal));right:calc(12px + var(--sar));
         gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
     #ui button{font-size:13px;padding:11px 12px;width:100%}
     #prefs{font-size:12px;max-width:min(160px,46vw)}
@@ -416,6 +420,9 @@ const rgpdEl = document.getElementById('rgpd');
 function updateRgpdOffset(){
   const h = rgpdEl.style.display === 'none' ? 0 : rgpdEl.getBoundingClientRect().height;
   document.documentElement.style.setProperty('--rgpd-h', h + 'px');
+  const ui = document.getElementById('ui');
+  const uiH = ui ? ui.getBoundingClientRect().height : 44;
+  document.documentElement.style.setProperty('--ui-h', uiH + 'px');
 }
 if(localStorage.getItem(RKEY) !== '1'){
   rgpdEl.style.display = 'flex';
@@ -423,6 +430,7 @@ if(localStorage.getItem(RKEY) !== '1'){
   // (setTimeout, not rAF: rAF is paused in background/inactive tabs)
   setTimeout(updateRgpdOffset, 50);
 }
+setTimeout(updateRgpdOffset, 50);
 document.getElementById('rgpdOk').onclick = ()=>{
   localStorage.setItem(RKEY,'1'); rgpdEl.style.display='none'; updateRgpdOffset();
 };
