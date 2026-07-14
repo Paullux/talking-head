@@ -126,6 +126,41 @@ async function chat(userText, history = [], id = shortId()) {
   return reply;
 }
 
+async function compactMemory(summary = "", history = [], id = shortId()) {
+  if (!LLM_API_KEY.trim()) {
+    throw new Error("LLM_API_KEY manquante cote serveur");
+  }
+  const t0 = Date.now();
+  logStep(id, "compact:start", `turns=${history.length}`);
+  const res = await fetch(`${LLM_API_BASE}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${LLM_API_KEY}` },
+    body: JSON.stringify({
+      model: LLM_MODEL,
+      max_tokens: 180,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: "Résume en français, en moins de 900 caractères, uniquement les faits utiles pour continuer une conversation avec Nora: préférences de l'utilisateur, décisions de design, contexte durable. Ignore les hésitations, détails temporaires et données sensibles. Ne fais pas de markdown.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            resume_actuel: String(summary || "").slice(0, 1200),
+            derniers_messages: history.slice(-12),
+          }),
+        },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  const compact = (data.choices?.[0]?.message?.content || "").trim().slice(0, 1000);
+  logStep(id, "compact:ok", `ms=${Date.now() - t0} chars=${compact.length}`);
+  return compact;
+}
+
 // ---- server -------------------------------------------------------------
 const app = express();
 // behind Coolify/Traefik: trust the proxy's X-Forwarded-For so rate-limiting
@@ -195,6 +230,7 @@ app.get("/api/version", (_req, res) => res.json({
   endpoints: {
     health: "GET /api/health",
     chatText: "POST /api/chat-text",
+    compact: "POST /api/compact",
     say: "POST /api/say",
     chat: "POST /api/chat",
     diagnosticPage: "GET /_diag.html",
@@ -211,6 +247,10 @@ app.get("/api/chat", (_req, res) => res.status(405).json({
 
 app.get("/api/chat-text", (_req, res) => res.status(405).json({
   error: "Utilise POST /api/chat-text avec JSON {\"text\":\"Bonjour\",\"history\":[]}",
+}));
+
+app.get("/api/compact", (_req, res) => res.status(405).json({
+  error: "Utilise POST /api/compact avec JSON {\"summary\":\"...\",\"history\":[]}",
 }));
 
 app.post("/api/say", heavyBurst, heavySustained, concurrencyGuard, async (req, res) => {
@@ -232,6 +272,22 @@ app.post("/api/chat-text", lightBurst, lightSustained, async (req, res) => {
     res.json({ reply });
   } catch (e) {
     logStep(id, "api:chat-text:error", String(e.message || e));
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.post("/api/compact", lightBurst, lightSustained, async (req, res) => {
+  const id = shortId();
+  try {
+    logStep(id, "api:compact");
+    const summary = await compactMemory(
+      String(req.body.summary || "").slice(0, 1200),
+      Array.isArray(req.body.history) ? req.body.history : [],
+      id,
+    );
+    res.json({ summary });
+  } catch (e) {
+    logStep(id, "api:compact:error", String(e.message || e));
     res.status(500).json({ error: String(e.message || e) });
   }
 });

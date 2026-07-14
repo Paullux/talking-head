@@ -32,28 +32,31 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#15171c;color:#ddd;font-family:system-ui,sans-serif;overflow:hidden}
-  #c{display:block;width:100vw;height:100vh}
+  #bg{position:fixed;inset:0;z-index:0;overflow:hidden;background:#15171c}
+  #bg img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;filter:blur(3px);transform:scale(1.025)}
+  #bg::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(6,7,10,.5),rgba(6,7,10,.18) 42%,rgba(6,7,10,.46));pointer-events:none}
+  #c{position:fixed;inset:0;z-index:1;display:block;width:100vw;height:100vh}
   #ui{position:fixed;left:calc(16px + var(--sal));right:calc(16px + var(--sar));
       bottom:calc(16px + var(--sab) + var(--rgpd-h));transition:bottom .2s;
-      display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+      display:flex;flex-wrap:wrap;gap:10px;align-items:center;z-index:3}
   button{background:#e11d48;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-size:15px;cursor:pointer;
          min-height:44px;flex:0 1 auto}
-  #status{position:fixed;left:calc(16px + var(--sal));top:calc(12px + var(--sat));font-size:13px;opacity:.7;
+  #status{position:fixed;left:calc(16px + var(--sal));top:calc(12px + var(--sat));font-size:13px;opacity:.7;z-index:3;
           max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #heard{position:fixed;left:calc(16px + var(--sal));top:calc(36px + var(--sat));max-width:min(520px,70vw);
          font-size:15px;line-height:1.35;color:#fff;
-         padding:7px 10px;border-radius:8px;background:rgba(8,10,14,.5);opacity:0;transition:opacity .2s}
+         padding:7px 10px;border-radius:8px;background:rgba(8,10,14,.5);opacity:0;transition:opacity .2s;z-index:3}
   #heard.on{opacity:1}
   #name{position:fixed;top:calc(14px + var(--sat));left:0;right:0;text-align:center;font-size:26px;font-weight:700;
         letter-spacing:.06em;background:linear-gradient(90deg,#7cc4ff,#b18cff);-webkit-background-clip:text;
-        background-clip:text;color:transparent;text-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none}
+        background-clip:text;color:transparent;text-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none;z-index:3}
   #reply{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(74px + var(--sab) + var(--rgpd-h));
          max-width:min(860px,90vw);text-align:center;font-size:22px;line-height:1.35;color:#fff;
          padding:8px 16px;border-radius:10px;background:rgba(8,10,14,.62);
-         text-shadow:0 1px 3px #000;opacity:0;transition:opacity .25s, bottom .2s}
+         text-shadow:0 1px 3px #000;opacity:0;transition:opacity .25s, bottom .2s;z-index:3}
   #reply.on{opacity:1}
   #prefs{position:fixed;top:calc(44px + var(--sat));right:calc(14px + var(--sar));display:flex;flex-direction:column;
-         gap:6px;align-items:flex-end;font-size:13px;max-width:min(220px,42vw)}
+         gap:6px;align-items:flex-end;font-size:13px;max-width:min(220px,42vw);z-index:3}
   #prefs label{display:flex;gap:6px;align-items:center;background:rgba(8,10,14,.6);padding:6px 10px;border-radius:8px;
                cursor:pointer;min-height:32px}
   #prefs button{background:#3a2140;color:#f3d0ff;border:0;padding:6px 10px;border-radius:8px;font-size:12px;
@@ -64,7 +67,7 @@
         max-height:60vh;overflow-y:auto}
   #rgpd b{color:#9cf} #rgpd button{background:#e11d48;color:#fff;border:0;padding:10px 16px;border-radius:8px;
           cursor:pointer;min-height:44px;white-space:nowrap}
-  #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:4;
                 background:rgba(10,12,16,.55);backdrop-filter:blur(2px);padding:20px}
   #start{font-size:18px;padding:16px 30px;border-radius:12px;min-height:52px}
   #start:disabled{opacity:.5;cursor:default}
@@ -87,6 +90,7 @@
 </style>
 </head>
 <body>
+<div id="bg" aria-hidden="true"><img src="/graffiti-lounge-bg.png" alt=""></div>
 <canvas id="c"></canvas>
 <div id="name">Nora</div>
 <div id="status">chargement…</div>
@@ -101,7 +105,7 @@
   <button id="clearBtn">🗑 Effacer l'historique</button>
 </div>
 <div id="rgpd">
-  <span>🔒 Nora mémorise la conversation <b>uniquement dans votre navigateur</b> (localStorage), et seulement si vous cochez « Enregistrer ». Vos messages sont envoyés au modèle (Mistral) et à ce serveur pour générer la voix, mais <b>ne sont pas stockés côté serveur</b>.</span>
+  <span>🔒 Nora mémorise la conversation <b>uniquement dans votre navigateur</b> (localStorage), et seulement si vous cochez « Enregistrer ». Les messages utiles au contexte sont envoyés au modèle (Mistral) et à ce serveur pour répondre et générer la voix, mais <b>ne sont pas stockés côté serveur</b>.</span>
   <button id="rgpdOk">J'ai compris</button>
 </div>
 <div id="startOverlay"><button id="start" disabled>chargement…</button></div>
@@ -139,11 +143,10 @@ async function postJson(url, payload){
 }
 
 // ---- scene ----
-const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true, preserveDrawingBuffer:true});
+const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true, alpha:true, preserveDrawingBuffer:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x15171c);
 const camera = new THREE.PerspectiveCamera(28, innerWidth/innerHeight, 0.01, 100);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x4b4652, 1.35));
@@ -199,7 +202,6 @@ function speak(audioSrc, newCues, text){
   audio.onended = ()=>{
     playing=false;
     set(wantsListen ? 'écoute…' : 'à toi 🎤');
-    setTimeout(()=>replyEl.classList.remove('on'), 1400);
     if(wantsListen) startListening();
   };
   audio.oncanplay = ()=>{
@@ -283,16 +285,61 @@ document.getElementById('start').onclick = async ()=>{
 };
 
 // ---- conversation history + RGPD (all client-side, localStorage) ----
-const HKEY='nora_history', SKEY='nora_save', RKEY='nora_rgpd';
+const HKEY='nora_history', SKEY='nora_save', RKEY='nora_rgpd', CKEY='nora_compact';
 let history = [];
-try { history = JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch(e){}
 let saveOn = localStorage.getItem(SKEY) === '1';   // privacy by default: off
+let compactSummary = '';
+if(saveOn){
+  try { history = JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch(e){}
+  compactSummary = localStorage.getItem(CKEY) || '';
+}
 const saveChk = document.getElementById('saveChk');
 saveChk.checked = saveOn;
-saveChk.onchange = ()=>{ saveOn = saveChk.checked; localStorage.setItem(SKEY, saveOn?'1':'0'); if(saveOn) persist(); };
-function persist(){ if(saveOn) localStorage.setItem(HKEY, JSON.stringify(history.slice(-40))); }
+saveChk.onchange = ()=>{
+  saveOn = saveChk.checked;
+  localStorage.setItem(SKEY, saveOn?'1':'0');
+  if(saveOn) persist();
+  else {
+    compactSummary = '';
+    localStorage.removeItem(HKEY);
+    localStorage.removeItem(CKEY);
+  }
+};
+function persist(){
+  if(!saveOn) return;
+  localStorage.setItem(HKEY, JSON.stringify(history.slice(-12)));
+  if(compactSummary) localStorage.setItem(CKEY, compactSummary);
+}
+function buildContext(){
+  const ctx = [];
+  if(saveOn && compactSummary){
+    ctx.push({role:'system', content:'Mémoire compacte des échanges précédents: '+compactSummary});
+  }
+  return ctx.concat(history.slice(saveOn ? -6 : -4));
+}
+let compacting = false;
+function scheduleCompact(){
+  if(!saveOn || compacting || history.length < 8) return;
+  compacting = true;
+  setTimeout(async ()=>{
+    try{
+      const data = await postJson('/api/compact', {summary: compactSummary, history: history.slice(-12)});
+      compactSummary = data.summary || compactSummary;
+      history = history.slice(-6);
+      persist();
+    }catch(e){
+      console.warn('compact failed', e);
+    }finally{
+      compacting = false;
+    }
+  }, 50);
+}
 document.getElementById('clearBtn').onclick = ()=>{
-  history = []; localStorage.removeItem(HKEY); set('historique effacé');
+  history = [];
+  compactSummary = '';
+  localStorage.removeItem(HKEY);
+  localStorage.removeItem(CKEY);
+  set('historique effacé');
 };
 // RGPD banner (once) -- while shown, push the bottom UI/subtitles above it
 // (measured, not guessed: the banner's text wraps differently per viewport).
@@ -330,7 +377,11 @@ else {
     if(wantsListen) startListening();
     else set('à toi 🎤');
   };
-  rec.onstart = ()=>{ listening = true; micBtn.textContent = '🎤 Écoute…'; };
+  rec.onstart = ()=>{
+    listening = true;
+    micBtn.textContent = '🎤 Écoute…';
+    replyEl.classList.remove('on');
+  };
   rec.onend = ()=>{
     listening = false;
     if(!busy && !playing){
@@ -346,9 +397,10 @@ else {
     set('« '+text+' »');
     try{
       set('Nora réfléchit…');
-      const llm = await postJson('/api/chat-text', {text, history: history.slice(-8)});
+      const llm = await postJson('/api/chat-text', {text, history: buildContext()});
       history.push({role:'user', content:text}, {role:'assistant', content:llm.reply});
       persist();
+      scheduleCompact();
       set('Nora prépare sa voix…');
       const voice = await postJson('/api/say', {text: llm.reply});
       set('voix prête…');
