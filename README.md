@@ -1,6 +1,8 @@
-# Talking Head — avatar vocal incarné (web)
+# Nora Talking Head — avatar vocal incarné (web)
 
 ![Real-time 3D Avatar with Lip Sync](docs/banner.png)
+
+[GitHub — Paullux/nora-talking-head](https://github.com/Paullux/nora-talking-head)
 
 **Nora** — une assistante 3D qui **parle** : micro → LLM (API externe) → voix (Piper) → visèmes (Rhubarb) → lip-sync temps réel dans le navigateur (three.js).
 
@@ -32,7 +34,7 @@ Copier `.env.example` → `.env` et remplir :
 La clé LLM reste **côté serveur** — jamais envoyée au navigateur.
 
 ## Déployer sur Coolify (VPS)
-1. Pousser ce dossier `web/` dans un repo Git.
+1. Pousser ce dossier dans le repo [`Paullux/nora-talking-head`](https://github.com/Paullux/nora-talking-head).
 2. Coolify → New Resource → **Dockerfile** (ou Docker Compose) → pointer sur ce repo.
 3. Renseigner les variables d'env (au moins `LLM_API_KEY`, `LLM_API_BASE`, `LLM_MODEL`).
 4. Port applicatif **3000**. Coolify gère le domaine + HTTPS.
