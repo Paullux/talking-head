@@ -5,13 +5,14 @@
 // text -> voice -> visemes and the LLM call (key stays server-side).
 
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual, createHash } from "node:crypto";
 
 const execFileP = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +29,13 @@ const {
   LLM_MODEL = "mistral-small-latest",
   LLM_MAX_TOKENS = "220",
   SYSTEM_PROMPT = "Tu t'appelles Nora, une assistante incarnée dans un avatar 3D. Tu es vive, chaleureuse et un peu taquine. Tu réponds en français, à l'oral, en 1 à 3 phrases courtes et naturelles. Pas de listes, pas de markdown, pas d'emojis.",
+  DIAG_PASSWORD = "",
 } = process.env;
+
+// max simultaneous Piper/ffmpeg/Rhubarb pipelines — this VPS has 1 vCPU, so
+// running several at once degrades everyone instead of queuing fairly.
+const MAX_CONCURRENT_SAY = 2;
+let activeSay = 0;
 
 // ---- text -> voice(wav) -> visemes(cues) --------------------------------
 function shortId() {
@@ -127,6 +134,9 @@ async function chat(userText, history = [], id = shortId()) {
 
 // ---- server -------------------------------------------------------------
 const app = express();
+// behind Coolify/Traefik: trust the proxy's X-Forwarded-For so rate-limiting
+// (and req.ip generally) sees the real client IP, not the proxy's.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use((req, res, next) => {
   if (req.path === "/" || req.path.endsWith(".html")) {
@@ -134,7 +144,46 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// ---- shared-secret gate for the diagnostics page (fail-closed) -----------
+function timingSafeStrEqual(a, b) {
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+app.get("/_diag.html", (req, res, next) => {
+  if (!DIAG_PASSWORD) return res.status(403).send("Diagnostics désactivés (DIAG_PASSWORD non configuré).");
+  const auth = req.headers.authorization || "";
+  const [scheme, encoded] = auth.split(" ");
+  const [, pass] = scheme === "Basic" && encoded
+    ? Buffer.from(encoded, "base64").toString("utf8").split(":")
+    : [null, null];
+  if (pass && timingSafeStrEqual(pass, DIAG_PASSWORD)) return next();
+  res.set("WWW-Authenticate", 'Basic realm="Nora diagnostics"');
+  res.status(401).send("Authentification requise.");
+});
+
 app.use(express.static(join(__dirname, "public")));
+
+// ---- rate limits (per client IP) -----------------------------------------
+// heavy = Piper + ffmpeg + Rhubarb (/api/say, /api/chat); light = LLM only.
+const heavyBurst = rateLimit({ windowMs: 30_000, max: 3, standardHeaders: true, legacyHeaders: false });
+const heavySustained = rateLimit({ windowMs: 5 * 60_000, max: 10, standardHeaders: true, legacyHeaders: false });
+const lightBurst = rateLimit({ windowMs: 30_000, max: 6, standardHeaders: true, legacyHeaders: false });
+const lightSustained = rateLimit({ windowMs: 5 * 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
+
+// concurrency guard: reject immediately rather than queue (predictable UX)
+function concurrencyGuard(req, res, next) {
+  if (activeSay >= MAX_CONCURRENT_SAY) {
+    return res.status(429).json({ error: "Nora est occupée, réessaie dans un instant." });
+  }
+  activeSay++;
+  let released = false;
+  const release = () => { if (!released) { released = true; activeSay = Math.max(0, activeSay - 1); } };
+  res.on("finish", release);
+  res.on("close", release);
+  next();
+}
 
 app.get("/api/health", (_req, res) => res.json({
   ok: true,
@@ -143,7 +192,6 @@ app.get("/api/health", (_req, res) => res.json({
     configured: Boolean(LLM_API_KEY.trim()),
     apiBase: LLM_API_BASE,
     model: LLM_MODEL,
-    keyPrefix: LLM_API_KEY.trim() ? `${LLM_API_KEY.trim().slice(0, 6)}...` : null,
   },
 }));
 
@@ -171,7 +219,7 @@ app.get("/api/chat-text", (_req, res) => res.status(405).json({
   error: "Utilise POST /api/chat-text avec JSON {\"text\":\"Bonjour\",\"history\":[]}",
 }));
 
-app.post("/api/say", async (req, res) => {
+app.post("/api/say", heavyBurst, heavySustained, concurrencyGuard, async (req, res) => {
   const id = shortId();
   try {
     logStep(id, "api:say");
@@ -182,7 +230,7 @@ app.post("/api/say", async (req, res) => {
   }
 });
 
-app.post("/api/chat-text", async (req, res) => {
+app.post("/api/chat-text", lightBurst, lightSustained, async (req, res) => {
   const id = shortId();
   try {
     logStep(id, "api:chat-text");
@@ -194,7 +242,7 @@ app.post("/api/chat-text", async (req, res) => {
   }
 });
 
-app.post("/api/chat", async (req, res) => {
+app.post("/api/chat", heavyBurst, heavySustained, concurrencyGuard, async (req, res) => {
   const id = shortId();
   try {
     logStep(id, "api:chat");
