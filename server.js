@@ -221,6 +221,15 @@ function normalizeImageDataUrl(dataUrl) {
   return value;
 }
 
+function looksLikeImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return /\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(parsed.pathname + parsed.search);
+  } catch {
+    return false;
+  }
+}
+
 async function analyzeImage({ imageUrl, prompt = "", history = [] }, id = shortId()) {
   if (!LLM_API_KEY.trim()) {
     throw new Error("LLM_API_KEY manquante cote serveur");
@@ -268,13 +277,30 @@ function htmlToPlainText(html) {
 
 async function analyzeLink({ url, prompt = "", history = [] }, id = shortId()) {
   const safeUrl = assertSafePublicUrl(url);
+  if (looksLikeImageUrl(safeUrl)) {
+    return analyzeImage({ imageUrl: safeUrl, prompt, history }, id);
+  }
   logStep(id, "link:fetch", safeUrl.slice(0, 120));
-  const response = await fetch(safeUrl, {
-    redirect: "follow",
-    signal: AbortSignal.timeout(10_000),
-    headers: { "user-agent": "Nora/0.1 link analyzer" },
-  });
-  if (!response.ok) throw new Error(`URL HTTP ${response.status}`);
+  let response;
+  try {
+    response = await fetch(safeUrl, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 Nora/0.1",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
+        "accept-language": "fr-FR,fr;q=0.9,en;q=0.7",
+      },
+    });
+  } catch {
+    throw new Error("Impossible de charger ce lien depuis le serveur. Essaie avec une capture d'écran ou une image directe.");
+  }
+  if (!response.ok) {
+    if ([401, 403, 429].includes(response.status)) {
+      throw new Error(`Ce site refuse l'analyse automatique (${response.status}). Essaie avec une capture d'écran ou une image directe.`);
+    }
+    throw new Error(`URL HTTP ${response.status}`);
+  }
   const type = (response.headers.get("content-type") || "").toLowerCase();
   if (type.startsWith("image/")) {
     return analyzeImage({ imageUrl: safeUrl, prompt, history }, id);
