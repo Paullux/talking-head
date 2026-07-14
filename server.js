@@ -23,7 +23,6 @@ const {
   PIPER_VOICE = "/opt/voices/fr_FR-siwis-medium.onnx",
   RHUBARB_BIN = "rhubarb",
   RHUBARB_RECOGNIZER = "phonetic",
-  FFMPEG_BIN = "ffmpeg",
   LLM_API_BASE = "https://api.mistral.ai/v1",
   LLM_API_KEY = "",
   LLM_MODEL = "mistral-small-latest",
@@ -32,7 +31,7 @@ const {
   DIAG_PASSWORD = "",
 } = process.env;
 
-// max simultaneous Piper/ffmpeg/Rhubarb pipelines — this VPS has 1 vCPU, so
+// max simultaneous Piper/Rhubarb pipelines — this VPS has 1 vCPU, so
 // running several at once degrades everyone instead of queuing fairly.
 const MAX_CONCURRENT_SAY = 2;
 let activeSay = 0;
@@ -79,23 +78,18 @@ async function say(text, id = shortId()) {
   const timings = {};
   try {
     const raw = join(dir, "raw.wav");
-    const wav16 = join(dir, "v16.wav");
     // Piper: text on stdin -> wav
     logStep(id, "tts:piper:start", `chars=${text.length}`);
     await spawnWithInput(PIPER_BIN, ["--model", PIPER_VOICE, "--output_file", raw], text);
     timings.piperMs = Date.now() - t0;
     logStep(id, "tts:piper:ok", `ms=${timings.piperMs}`);
-    // normalise for Rhubarb (mono 16k PCM)
-    const ffmpegT0 = Date.now();
-    logStep(id, "tts:ffmpeg:start");
-    await execFileP(FFMPEG_BIN, ["-y", "-i", raw, "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav16]);
-    timings.ffmpegMs = Date.now() - ffmpegT0;
-    logStep(id, "tts:ffmpeg:ok", `ms=${timings.ffmpegMs}`);
-    // visemes
+    // visemes -- Rhubarb decodes WAV itself (any sample rate / channel count),
+    // no ffmpeg pre-conversion needed. Verified directly: Piper's native output
+    // (mono, its model's native rate, e.g. 22050Hz) feeds Rhubarb fine as-is.
     const rhubarbT0 = Date.now();
     logStep(id, "lipsync:rhubarb:start", `recognizer=${RHUBARB_RECOGNIZER}`);
     const { stdout } = await execFileP(RHUBARB_BIN,
-      ["-f", "json", "--recognizer", RHUBARB_RECOGNIZER, "--extendedShapes", "GHX", wav16],
+      ["-f", "json", "--recognizer", RHUBARB_RECOGNIZER, "--extendedShapes", "GHX", raw],
       { maxBuffer: 16 * 1024 * 1024 });
     timings.rhubarbMs = Date.now() - rhubarbT0;
     const cues = JSON.parse(stdout).mouthCues;
@@ -166,7 +160,7 @@ app.get("/_diag.html", (req, res, next) => {
 app.use(express.static(join(__dirname, "public")));
 
 // ---- rate limits (per client IP) -----------------------------------------
-// heavy = Piper + ffmpeg + Rhubarb (/api/say, /api/chat); light = LLM only.
+// heavy = Piper + Rhubarb (/api/say, /api/chat); light = LLM only.
 const heavyBurst = rateLimit({ windowMs: 30_000, max: 3, standardHeaders: true, legacyHeaders: false });
 const heavySustained = rateLimit({ windowMs: 5 * 60_000, max: 10, standardHeaders: true, legacyHeaders: false });
 const lightBurst = rateLimit({ windowMs: 30_000, max: 6, standardHeaders: true, legacyHeaders: false });

@@ -14,7 +14,7 @@ web/
     avatar.glb       mesh + 11 morph targets (visèmes A–H + blink/browUp/browFurrow)
     vendor/          three.js (local, pas de CDN)
   server.js          Express : /api/say, /api/chat
-  Dockerfile         Node + ffmpeg + Piper (voix FR) + Rhubarb
+  Dockerfile         Node + Piper (voix FR) + Rhubarb
   docker-compose.yml
   .env.example       config (clé LLM, personnalité…)
 ```

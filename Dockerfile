@@ -1,10 +1,12 @@
 # Embodied voice-avatar — single image for Coolify.
-# Bundles Node + ffmpeg + Piper (TTS, FR voice) + Rhubarb (visemes).
+# Bundles Node + Piper (TTS, FR voice) + Rhubarb (visemes).
+# No ffmpeg: Rhubarb decodes Piper's native WAV output directly (verified --
+# no pre-conversion needed), which also shaves ~1s off every response.
 FROM node:20-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg wget unzip ca-certificates libgomp1 \
+      wget unzip ca-certificates libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- Piper (TTS) + French voice ----------------------------------------
@@ -39,7 +41,6 @@ ENV PORT=3000 \
     PIPER_BIN=/opt/piper/piper \
     PIPER_VOICE=/opt/voices/fr_FR-siwis-low.onnx \
     RHUBARB_BIN=/opt/rhubarb/rhubarb \
-    RHUBARB_RECOGNIZER=phonetic \
-    FFMPEG_BIN=ffmpeg
+    RHUBARB_RECOGNIZER=phonetic
 EXPOSE 3000
 CMD ["node", "server.js"]
