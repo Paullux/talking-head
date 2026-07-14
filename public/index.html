@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Nora — avatar vocal</title>
 <meta name="description" content="Nora est un avatar vocal 3D avec LLM, voix Piper et lip-sync Rhubarb en temps réel.">
 <meta name="theme-color" content="#15171c">
@@ -25,31 +25,65 @@
 <meta name="twitter:description" content="LLM, voix Piper et lip-sync Rhubarb dans un avatar web 3D.">
 <meta name="twitter:image" content="https://nora.marv-bot.fr/og-image.png">
 <style>
+  :root{
+    --sat:env(safe-area-inset-top,0px); --sar:env(safe-area-inset-right,0px);
+    --sab:env(safe-area-inset-bottom,0px); --sal:env(safe-area-inset-left,0px);
+    --rgpd-h:0px;
+  }
+  *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#15171c;color:#ddd;font-family:system-ui,sans-serif;overflow:hidden}
   #c{display:block;width:100vw;height:100vh}
-  #ui{position:fixed;left:16px;bottom:16px;display:flex;gap:10px;align-items:center}
-  button{background:#e11d48;color:#fff;border:0;padding:10px 18px;border-radius:8px;font-size:15px;cursor:pointer}
-  #status{position:fixed;left:16px;top:12px;font-size:13px;opacity:.7}
-  #heard{position:fixed;left:16px;top:36px;max-width:min(520px,78vw);font-size:15px;line-height:1.35;color:#fff;
+  #ui{position:fixed;left:calc(16px + var(--sal));right:calc(16px + var(--sar));
+      bottom:calc(16px + var(--sab) + var(--rgpd-h));transition:bottom .2s;
+      display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  button{background:#e11d48;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-size:15px;cursor:pointer;
+         min-height:44px;flex:0 1 auto}
+  #status{position:fixed;left:calc(16px + var(--sal));top:calc(12px + var(--sat));font-size:13px;opacity:.7;
+          max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #heard{position:fixed;left:calc(16px + var(--sal));top:calc(36px + var(--sat));max-width:min(520px,70vw);
+         font-size:15px;line-height:1.35;color:#fff;
          padding:7px 10px;border-radius:8px;background:rgba(8,10,14,.5);opacity:0;transition:opacity .2s}
   #heard.on{opacity:1}
-  #name{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:26px;font-weight:700;letter-spacing:.06em;
-        background:linear-gradient(90deg,#7cc4ff,#b18cff);-webkit-background-clip:text;background-clip:text;color:transparent;
-        text-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none}
-  #reply{position:fixed;left:50%;transform:translateX(-50%);bottom:74px;max-width:min(860px,90vw);
-         text-align:center;font-size:22px;line-height:1.35;color:#fff;
+  #name{position:fixed;top:calc(14px + var(--sat));left:0;right:0;text-align:center;font-size:26px;font-weight:700;
+        letter-spacing:.06em;background:linear-gradient(90deg,#7cc4ff,#b18cff);-webkit-background-clip:text;
+        background-clip:text;color:transparent;text-shadow:0 2px 10px rgba(0,0,0,.4);pointer-events:none}
+  #reply{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(74px + var(--sab) + var(--rgpd-h));
+         max-width:min(860px,90vw);text-align:center;font-size:22px;line-height:1.35;color:#fff;
          padding:8px 16px;border-radius:10px;background:rgba(8,10,14,.62);
-         text-shadow:0 1px 3px #000;opacity:0;transition:opacity .25s}
+         text-shadow:0 1px 3px #000;opacity:0;transition:opacity .25s, bottom .2s}
   #reply.on{opacity:1}
-  #prefs{position:fixed;top:44px;right:14px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-size:13px}
-  #prefs label{display:flex;gap:6px;align-items:center;background:rgba(8,10,14,.6);padding:6px 10px;border-radius:8px;cursor:pointer}
-  #prefs button{background:#3a2140;color:#f3d0ff;border:0;padding:6px 10px;border-radius:8px;font-size:12px;cursor:pointer}
-  #rgpd{position:fixed;left:0;right:0;bottom:0;display:none;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap;
-        padding:12px 18px;background:rgba(8,10,14,.94);border-top:1px solid #333;font-size:13px;z-index:5}
-  #rgpd b{color:#9cf} #rgpd button{background:#e11d48;color:#fff;border:0;padding:8px 16px;border-radius:8px;cursor:pointer}
-  #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,12,16,.55);backdrop-filter:blur(2px)}
-  #start{font-size:18px;padding:16px 30px;border-radius:12px}
+  #prefs{position:fixed;top:calc(44px + var(--sat));right:calc(14px + var(--sar));display:flex;flex-direction:column;
+         gap:6px;align-items:flex-end;font-size:13px;max-width:min(220px,42vw)}
+  #prefs label{display:flex;gap:6px;align-items:center;background:rgba(8,10,14,.6);padding:6px 10px;border-radius:8px;
+               cursor:pointer;min-height:32px}
+  #prefs button{background:#3a2140;color:#f3d0ff;border:0;padding:6px 10px;border-radius:8px;font-size:12px;
+                cursor:pointer;min-height:32px;width:100%}
+  #rgpd{position:fixed;left:0;right:0;bottom:0;display:none;gap:14px;align-items:center;justify-content:center;
+        flex-wrap:wrap;padding:calc(12px + var(--sab)) calc(18px + var(--sar)) calc(12px + var(--sab)) calc(18px + var(--sal));
+        background:rgba(8,10,14,.94);border-top:1px solid #333;font-size:13px;z-index:5;
+        max-height:60vh;overflow-y:auto}
+  #rgpd b{color:#9cf} #rgpd button{background:#e11d48;color:#fff;border:0;padding:10px 16px;border-radius:8px;
+          cursor:pointer;min-height:44px;white-space:nowrap}
+  #startOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+                background:rgba(10,12,16,.55);backdrop-filter:blur(2px);padding:20px}
+  #start{font-size:18px;padding:16px 30px;border-radius:12px;min-height:52px}
   #start:disabled{opacity:.5;cursor:default}
+
+  @media (max-width: 640px){
+    #name{font-size:20px}
+    #reply{font-size:17px;bottom:calc(64px + var(--sab));padding:7px 12px}
+    #heard{font-size:13px;max-width:min(300px,62vw)}
+    #status{font-size:12px}
+    #ui{bottom:calc(12px + var(--sab) + var(--rgpd-h));left:calc(12px + var(--sal));right:calc(12px + var(--sar));gap:8px}
+    #ui button{font-size:13px;padding:11px 14px;flex:1 1 auto}
+    #prefs{font-size:12px;max-width:min(160px,46vw)}
+    #prefs label{padding:5px 8px}
+    #rgpd{font-size:12px;padding-left:calc(14px + var(--sal));padding-right:calc(14px + var(--sar))}
+  }
+  @media (max-width: 380px){
+    #ui{flex-direction:column;align-items:stretch}
+    #ui button{width:100%}
+  }
 </style>
 </head>
 <body>
@@ -260,11 +294,23 @@ function persist(){ if(saveOn) localStorage.setItem(HKEY, JSON.stringify(history
 document.getElementById('clearBtn').onclick = ()=>{
   history = []; localStorage.removeItem(HKEY); set('historique effacé');
 };
-// RGPD banner (once)
-if(localStorage.getItem(RKEY) !== '1') document.getElementById('rgpd').style.display = 'flex';
+// RGPD banner (once) -- while shown, push the bottom UI/subtitles above it
+// (measured, not guessed: the banner's text wraps differently per viewport).
+const rgpdEl = document.getElementById('rgpd');
+function updateRgpdOffset(){
+  const h = rgpdEl.style.display === 'none' ? 0 : rgpdEl.getBoundingClientRect().height;
+  document.documentElement.style.setProperty('--rgpd-h', h + 'px');
+}
+if(localStorage.getItem(RKEY) !== '1'){
+  rgpdEl.style.display = 'flex';
+  // wait for layout to settle (wrapped text) before measuring the real height
+  // (setTimeout, not rAF: rAF is paused in background/inactive tabs)
+  setTimeout(updateRgpdOffset, 50);
+}
 document.getElementById('rgpdOk').onclick = ()=>{
-  localStorage.setItem(RKEY,'1'); document.getElementById('rgpd').style.display='none';
+  localStorage.setItem(RKEY,'1'); rgpdEl.style.display='none'; updateRgpdOffset();
 };
+addEventListener('resize', updateRgpdOffset);
 
 // ---- voice conversation : mic (STT) -> /api/chat -> speak ----
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
