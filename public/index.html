@@ -330,6 +330,7 @@ function scheduleCompact(){
   if(!saveOn || compacting || history.length < 8) return;
   compacting = true;
   setTimeout(async ()=>{
+    if(playing || busy || listening){ compacting = false; scheduleCompact(); return; }
     try{
       const data = await postJson('/api/compact', {summary: compactSummary, history: history.slice(-12)});
       compactSummary = data.summary || compactSummary;
@@ -340,7 +341,7 @@ function scheduleCompact(){
     }finally{
       compacting = false;
     }
-  }, 50);
+  }, 8000);
 }
 document.getElementById('clearBtn').onclick = ()=>{
   history = [];
@@ -474,14 +475,12 @@ else {
     set('« '+text+' »');
     try{
       set('Nora réfléchit…');
-      const llm = await postJson('/api/chat-text', {text, history: buildContext()});
-      history.push({role:'user', content:text}, {role:'assistant', content:llm.reply});
+      const voice = await postJson('/api/chat', {text, history: buildContext()});
+      history.push({role:'user', content:text}, {role:'assistant', content:voice.reply});
       persist();
       scheduleCompact();
-      set('Nora prépare sa voix…');
-      const voice = await postJson('/api/say', {text: llm.reply});
       set('voix prête…');
-      speak('data:'+voice.mime+';base64,'+voice.audio, voice.cues, llm.reply);
+      speak('data:'+voice.mime+';base64,'+voice.audio, voice.cues, voice.reply);
     }catch(e){
       set('erreur réseau: '+e.message);
       if(wantsListen) setTimeout(startListening, 800);

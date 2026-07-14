@@ -37,6 +37,21 @@ const VISION_MODEL = LLM_VISION_MODEL || LLM_MODEL;
 // running several at once degrades everyone instead of queuing fairly.
 const MAX_CONCURRENT_SAY = 2;
 let activeSay = 0;
+const SAY_CACHE_MAX = 40;
+const sayCache = new Map();
+
+function cacheKeyForSay(text) {
+  return createHash("sha256")
+    .update([PIPER_VOICE, RHUBARB_RECOGNIZER, text].join("\n"))
+    .digest("hex");
+}
+
+function rememberSay(key, value) {
+  sayCache.set(key, value);
+  if (sayCache.size > SAY_CACHE_MAX) {
+    sayCache.delete(sayCache.keys().next().value);
+  }
+}
 
 // ---- text -> voice(wav) -> visemes(cues) --------------------------------
 function shortId() {
@@ -75,14 +90,21 @@ function spawnWithInput(file, args, input, { timeoutMs = 30000 } = {}) {
 }
 
 async function say(text, id = shortId()) {
+  const safeText = String(text || "").slice(0, 800);
+  const key = cacheKeyForSay(safeText);
+  const cached = sayCache.get(key);
+  if (cached) {
+    logStep(id, "say:cache-hit", `chars=${safeText.length}`);
+    return {...cached, timings: {...cached.timings, cached: true}};
+  }
   const dir = await mkdtemp(join(tmpdir(), "say-"));
   const t0 = Date.now();
   const timings = {};
   try {
     const raw = join(dir, "raw.wav");
     // Piper: text on stdin -> wav
-    logStep(id, "tts:piper:start", `chars=${text.length}`);
-    await spawnWithInput(PIPER_BIN, ["--model", PIPER_VOICE, "--output_file", raw], text);
+    logStep(id, "tts:piper:start", `chars=${safeText.length}`);
+    await spawnWithInput(PIPER_BIN, ["--model", PIPER_VOICE, "--output_file", raw], safeText);
     timings.piperMs = Date.now() - t0;
     logStep(id, "tts:piper:ok", `ms=${timings.piperMs}`);
     // visemes -- Rhubarb decodes WAV itself (any sample rate / channel count),
@@ -98,7 +120,9 @@ async function say(text, id = shortId()) {
     const audio = await readFile(raw);
     timings.totalMs = Date.now() - t0;
     logStep(id, "say:ok", `ms=${timings.totalMs} cues=${cues.length} audio=${audio.length}`);
-    return { audio: audio.toString("base64"), mime: "audio/wav", cues, timings };
+    const result = { audio: audio.toString("base64"), mime: "audio/wav", cues, timings };
+    rememberSay(key, result);
+    return result;
   } finally {
     rm(dir, { recursive: true, force: true }).catch(() => {});
   }
